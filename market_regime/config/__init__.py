@@ -113,6 +113,12 @@ class TechnicalsSettings(BaseModel):
     stochastic_d: int = 3
     stochastic_overbought: float = 80.0
     stochastic_oversold: float = 20.0
+    vcp_lookback_days: int = 120
+    vcp_min_contractions: int = 2
+    vcp_min_contraction_pct: float = 3.0
+    vcp_tightening_ratio: float = 0.7
+    vcp_ready_range_pct: float = 5.0
+    vcp_pivot_proximity_pct: float = 3.0
 
 
 class PhaseSettings(BaseModel):

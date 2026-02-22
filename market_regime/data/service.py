@@ -45,6 +45,11 @@ class DataService:
         if cached_df is not None and not self._cache.is_stale(request.ticker, request.data_type):
             # Fresh cache — apply date filter and return
             df = self._filter_dates(cached_df, request.start_date, end_date)
+            if df.empty:
+                raise DataFetchError(
+                    str(provider.provider_type), request.ticker,
+                    "Cached data exists but no rows match the requested date range",
+                )
             result = DataResult(
                 ticker=request.ticker,
                 data_type=request.data_type,
@@ -82,6 +87,12 @@ class DataService:
             )
             df = provider.fetch(fetch_request)
 
+        if df.empty:
+            raise DataFetchError(
+                str(provider.provider_type), request.ticker,
+                "Provider returned no data. Verify the ticker is valid and has trading history.",
+            )
+
         # Write to cache
         meta = CacheMeta(
             ticker=request.ticker.upper(),
@@ -97,6 +108,11 @@ class DataService:
 
         # Apply date filter for the returned result
         filtered = self._filter_dates(df, request.start_date, end_date)
+        if filtered.empty:
+            raise DataFetchError(
+                str(provider.provider_type), request.ticker,
+                "Fetched data exists but no rows match the requested date range",
+            )
         result = DataResult(
             ticker=request.ticker,
             data_type=request.data_type,

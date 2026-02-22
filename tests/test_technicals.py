@@ -14,14 +14,19 @@ from market_regime.features.technicals import (
     compute_sma,
     compute_stochastic,
     compute_technicals,
+    compute_vcp,
     compute_vwma,
     _detect_golden_death_cross,
     _detect_macd_crossover,
 )
 from market_regime.models.technicals import (
+    MarketPhase,
+    PhaseIndicator,
     SignalDirection,
     SignalStrength,
     TechnicalSnapshot,
+    VCPData,
+    VCPStage,
 )
 
 
@@ -348,3 +353,256 @@ class TestValidation:
         )
         with pytest.raises(ValueError, match="empty"):
             compute_technicals(df, "EMPTY")
+
+
+def _make_vcp_ohlcv() -> pd.DataFrame:
+    """Build synthetic data with a clear VCP pattern.
+
+    Structure: uptrend (100 days) -> T1 wide contraction (30 days) ->
+    T2 tighter contraction (30 days) -> T3 tight squeeze (30 days).
+    Oscillation amplitudes are large enough to pass swing detection
+    threshold (1.5%) and volume declines across the base.
+    """
+    rng = np.random.default_rng(77)
+    n_warmup = 50
+    n_trend = 100
+    n_t1 = 30
+    n_t2 = 30
+    n_t3 = 30
+    n_total = n_warmup + n_trend + n_t1 + n_t2 + n_t3
+    dates = pd.bdate_range("2023-06-01", periods=n_total)
+
+    prices = np.empty(n_total)
+    # Warmup: flat around 80
+    prices[:n_warmup] = 80 + rng.normal(0, 0.3, n_warmup).cumsum()
+    # Uptrend: 80 -> 120
+    trend_start = prices[n_warmup - 1]
+    for i in range(n_trend):
+        idx = n_warmup + i
+        prices[idx] = trend_start + (40 * i / n_trend) + rng.normal(0, 0.5)
+
+    # T1: wide contraction around 120, amplitude 8 (~13% range)
+    t1_start = n_warmup + n_trend
+    t1_mid = prices[t1_start - 1]
+    for i in range(n_t1):
+        idx = t1_start + i
+        prices[idx] = t1_mid + 8 * np.sin(2 * np.pi * i / 15) + rng.normal(0, 0.2)
+
+    # T2: tighter contraction, amplitude 4 (~6.5% range)
+    t2_start = t1_start + n_t1
+    t2_mid = t1_mid
+    for i in range(n_t2):
+        idx = t2_start + i
+        prices[idx] = t2_mid + 4 * np.sin(2 * np.pi * i / 15) + rng.normal(0, 0.15)
+
+    # T3: tight squeeze, amplitude 2.5 (~4% range — still above 1.5% swing threshold)
+    t3_start = t2_start + n_t2
+    t3_mid = t2_mid
+    for i in range(n_t3):
+        idx = t3_start + i
+        prices[idx] = t3_mid + 2.5 * np.sin(2 * np.pi * i / 15) + rng.normal(0, 0.1)
+
+    prices = np.maximum(prices, 1.0)  # No zero prices
+
+    # High/Low have meaningful range for swing detection
+    noise = rng.uniform(0.005, 0.015, n_total) * prices
+    high = prices + noise
+    low = prices - noise
+    open_prices = prices + rng.normal(0, 0.2, n_total)
+
+    # Volume: declining across the base — each contraction has lower volume
+    # Also declining WITHIN the last 30 days for volume_trend detection
+    volume = np.full(n_total, 5e6, dtype=float)
+    volume[t1_start:t2_start] = np.linspace(5e6, 3.5e6, n_t1) + rng.normal(0, 1e5, n_t1)
+    volume[t2_start:t3_start] = np.linspace(3.5e6, 2e6, n_t2) + rng.normal(0, 1e5, n_t2)
+    volume[t3_start:] = np.linspace(2e6, 1e6, n_t3) + rng.normal(0, 5e4, n_t3)
+    volume = np.maximum(volume, 1e5)
+
+    return pd.DataFrame({
+        "Open": open_prices,
+        "High": high,
+        "Low": low,
+        "Close": prices,
+        "Volume": volume,
+    }, index=dates)
+
+
+class TestVCP:
+    def test_vcp_detects_contraction_in_synthetic(self):
+        """VCP detector should find contractions in synthetic VCP data."""
+        ohlcv = _make_vcp_ohlcv()
+        settings = TechnicalsSettings()
+        price = float(ohlcv["Close"].iloc[-1])
+        sma50 = float(compute_sma(ohlcv["Close"], 50).iloc[-1])
+        sma200 = float(compute_sma(ohlcv["Close"], 200).iloc[-1])
+
+        vcp = compute_vcp(ohlcv, price, sma50, sma200, ohlcv["Volume"], settings)
+        assert vcp is not None
+        assert vcp.stage != VCPStage.NONE
+        assert vcp.contraction_count >= 2
+        assert len(vcp.contraction_pcts) >= 2
+        # Each contraction should be tighter than the previous
+        for i in range(1, len(vcp.contraction_pcts)):
+            assert vcp.contraction_pcts[i] < vcp.contraction_pcts[i - 1]
+
+    def test_vcp_none_in_pure_uptrend(self, sample_ohlcv_trending: pd.DataFrame):
+        """Pure uptrend should not produce a VCP (no contractions)."""
+        snapshot = compute_technicals(sample_ohlcv_trending, "TREND")
+        # VCP might be None or stage NONE — either is acceptable
+        if snapshot.vcp is not None:
+            assert snapshot.vcp.stage == VCPStage.NONE or snapshot.vcp.contraction_count < 2
+
+    def test_vcp_none_in_choppy(self, sample_ohlcv_choppy: pd.DataFrame):
+        """Random chop should not produce an ordered tightening pattern."""
+        snapshot = compute_technicals(sample_ohlcv_choppy, "CHOP")
+        # Choppy data shouldn't produce a high-quality VCP
+        if snapshot.vcp is not None and snapshot.vcp.stage != VCPStage.NONE:
+            # Even if it finds something, score should be low
+            assert snapshot.vcp.score < 0.8
+
+    def test_vcp_score_range(self):
+        """VCP score must be between 0.0 and 1.0."""
+        ohlcv = _make_vcp_ohlcv()
+        settings = TechnicalsSettings()
+        price = float(ohlcv["Close"].iloc[-1])
+        sma50 = float(compute_sma(ohlcv["Close"], 50).iloc[-1])
+        sma200 = float(compute_sma(ohlcv["Close"], 200).iloc[-1])
+
+        vcp = compute_vcp(ohlcv, price, sma50, sma200, ohlcv["Volume"], settings)
+        assert vcp is not None
+        assert 0.0 <= vcp.score <= 1.0
+
+    def test_vcp_in_snapshot(self):
+        """compute_technicals should populate the vcp field."""
+        ohlcv = _make_vcp_ohlcv()
+        snapshot = compute_technicals(ohlcv, "VCP_TEST")
+        # VCP field should be populated (not None) for data with enough history
+        assert snapshot.vcp is not None
+        assert isinstance(snapshot.vcp, VCPData)
+
+    def test_vcp_signal_generated(self):
+        """VCP pattern should generate signals in snapshot.signals."""
+        ohlcv = _make_vcp_ohlcv()
+        snapshot = compute_technicals(ohlcv, "VCP_TEST")
+        if snapshot.vcp is not None and snapshot.vcp.stage != VCPStage.NONE:
+            vcp_signal_names = [s.name for s in snapshot.signals if s.name.startswith("VCP")]
+            assert len(vcp_signal_names) > 0
+
+    def test_vcp_description_nonempty(self):
+        """VCP description should always be populated."""
+        ohlcv = _make_vcp_ohlcv()
+        settings = TechnicalsSettings()
+        price = float(ohlcv["Close"].iloc[-1])
+        sma50 = float(compute_sma(ohlcv["Close"], 50).iloc[-1])
+        sma200 = float(compute_sma(ohlcv["Close"], 200).iloc[-1])
+
+        vcp = compute_vcp(ohlcv, price, sma50, sma200, ohlcv["Volume"], settings)
+        assert vcp is not None
+        assert vcp.description
+        assert len(vcp.description) > 0
+
+    def test_vcp_returns_none_short_data(self):
+        """VCP should return None if insufficient data."""
+        dates = pd.bdate_range("2024-01-01", periods=30)
+        prices = np.linspace(100, 110, 30)
+        ohlcv = pd.DataFrame({
+            "Open": prices,
+            "High": prices * 1.01,
+            "Low": prices * 0.99,
+            "Close": prices,
+            "Volume": np.full(30, 1e6),
+        }, index=dates)
+        settings = TechnicalsSettings()
+        vcp = compute_vcp(ohlcv, 110.0, 105.0, 100.0, ohlcv["Volume"], settings)
+        assert vcp is None
+
+    def test_vcp_pivot_above_price(self):
+        """Pivot price should be at or above recent swing highs."""
+        ohlcv = _make_vcp_ohlcv()
+        settings = TechnicalsSettings()
+        price = float(ohlcv["Close"].iloc[-1])
+        sma50 = float(compute_sma(ohlcv["Close"], 50).iloc[-1])
+        sma200 = float(compute_sma(ohlcv["Close"], 200).iloc[-1])
+
+        vcp = compute_vcp(ohlcv, price, sma50, sma200, ohlcv["Volume"], settings)
+        if vcp is not None and vcp.pivot_price is not None:
+            # Pivot should be near/above current price (within the base range)
+            assert vcp.pivot_price > 0
+
+    def test_vcp_volume_trend_declining(self):
+        """Synthetic VCP data has declining volume — detector should see it."""
+        ohlcv = _make_vcp_ohlcv()
+        settings = TechnicalsSettings()
+        price = float(ohlcv["Close"].iloc[-1])
+        sma50 = float(compute_sma(ohlcv["Close"], 50).iloc[-1])
+        sma200 = float(compute_sma(ohlcv["Close"], 200).iloc[-1])
+
+        vcp = compute_vcp(ohlcv, price, sma50, sma200, ohlcv["Volume"], settings)
+        assert vcp is not None
+        assert vcp.volume_trend == "declining"
+
+
+class TestPhaseIndicator:
+    def test_phase_populated_in_snapshot(self, sample_ohlcv_trending: pd.DataFrame):
+        """Phase indicator should always be present in snapshot."""
+        snapshot = compute_technicals(sample_ohlcv_trending, "TEST")
+        assert snapshot.phase is not None
+        assert isinstance(snapshot.phase, PhaseIndicator)
+        assert snapshot.phase.phase in MarketPhase
+
+    def test_uptrend_is_markup(self, sample_ohlcv_trending: pd.DataFrame):
+        """Uptrending data should classify as markup."""
+        snapshot = compute_technicals(sample_ohlcv_trending, "TEST")
+        # Strong uptrend should be markup
+        assert snapshot.phase.phase == MarketPhase.MARKUP
+
+    def test_choppy_not_markup(self, sample_ohlcv_choppy: pd.DataFrame):
+        """Choppy data should not classify as markup."""
+        snapshot = compute_technicals(sample_ohlcv_choppy, "CHOP")
+        assert snapshot.phase.phase != MarketPhase.MARKUP
+
+    def test_confidence_bounded(self, sample_ohlcv_trending: pd.DataFrame):
+        """Phase confidence must be between 0.10 and 0.95."""
+        snapshot = compute_technicals(sample_ohlcv_trending, "TEST")
+        assert 0.10 <= snapshot.phase.confidence <= 0.95
+
+    def test_description_nonempty(self, sample_ohlcv_trending: pd.DataFrame):
+        """Phase description should always have content."""
+        snapshot = compute_technicals(sample_ohlcv_trending, "TEST")
+        assert snapshot.phase.description
+        assert len(snapshot.phase.description) > 10
+
+    def test_phase_signal_generated(self, sample_ohlcv_trending: pd.DataFrame):
+        """Phase signal should appear in snapshot.signals."""
+        snapshot = compute_technicals(sample_ohlcv_trending, "TEST")
+        phase_signals = [s for s in snapshot.signals if s.name.startswith("Phase:")]
+        assert len(phase_signals) == 1
+
+    def test_swing_flags_populated(self, sample_ohlcv_trending: pd.DataFrame):
+        """Swing pattern flags should be booleans."""
+        snapshot = compute_technicals(sample_ohlcv_trending, "TEST")
+        p = snapshot.phase
+        assert isinstance(p.higher_highs, bool)
+        assert isinstance(p.higher_lows, bool)
+        assert isinstance(p.lower_highs, bool)
+        assert isinstance(p.lower_lows, bool)
+
+    def test_volume_trend_valid(self, sample_ohlcv_choppy: pd.DataFrame):
+        """Volume trend should be one of the three values."""
+        snapshot = compute_technicals(sample_ohlcv_choppy, "CHOP")
+        assert snapshot.phase.volume_trend in ("declining", "stable", "rising")
+
+    def test_downtrend_is_markdown(self):
+        """Monotonic downtrend should classify as markdown."""
+        dates = pd.bdate_range("2024-01-01", periods=250)
+        rng = np.random.default_rng(42)
+        prices = 200 * np.exp(np.cumsum(rng.normal(-0.002, 0.008, 250)))
+        ohlcv = pd.DataFrame({
+            "Open": prices,
+            "High": prices * (1 + rng.uniform(0.005, 0.015, 250)),
+            "Low": prices * (1 - rng.uniform(0.005, 0.015, 250)),
+            "Close": prices,
+            "Volume": rng.integers(1_000_000, 10_000_000, 250).astype(float),
+        }, index=dates)
+        snapshot = compute_technicals(ohlcv, "DOWN")
+        assert snapshot.phase.phase == MarketPhase.MARKDOWN

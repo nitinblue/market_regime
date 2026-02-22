@@ -56,17 +56,21 @@ def _compute_raw_features(ohlcv: pd.DataFrame, config: FeatureConfig) -> pd.Data
         axis=1,
     ).max(axis=1)
     atr = true_range.rolling(config.atr_window).mean()
-    features["atr_normalized"] = atr / close
+    # Guard: avoid division by zero for penny stocks or zero-price rows
+    safe_close = close.replace(0, np.nan)
+    features["atr_normalized"] = atr / safe_close
 
     # Trend strength: slope proxy of SMA, normalized
     sma = close.rolling(config.trend_window).mean()
+    safe_sma = sma.replace(0, np.nan)
     features["trend_strength"] = (sma - sma.shift(config.trend_window)) / (
-        config.trend_window * sma
+        config.trend_window * safe_sma
     )
 
     # Volume anomaly
     vol_avg = volume.rolling(config.volume_window).mean()
-    features["volume_anomaly"] = volume / vol_avg
+    safe_vol_avg = vol_avg.replace(0, np.nan)
+    features["volume_anomaly"] = volume / safe_vol_avg
 
     return features
 
@@ -118,6 +122,12 @@ def compute_features(
         config.volume_window,
     )
     normalized, _, _ = _normalize_features(raw, lookback)
+    if normalized.empty:
+        raise ValueError(
+            f"Feature normalization produced no valid rows. "
+            f"Need at least ~{lookback * 2} trading days of OHLCV data "
+            f"(have {len(ohlcv)} rows, lookback={lookback})."
+        )
     return normalized
 
 
@@ -150,6 +160,13 @@ def compute_features_with_inspection(
         )
 
     normalized, rolling_means, rolling_stds = _normalize_features(raw, lookback)
+
+    if normalized.empty:
+        raise ValueError(
+            f"Feature normalization for {ticker} produced no valid rows. "
+            f"Need at least ~{lookback * 2} trading days of OHLCV data "
+            f"(have {len(ohlcv)} rows, lookback={lookback})."
+        )
 
     # Drop NaN rows from raw to match normalized index for inspection
     raw_valid = raw.dropna()

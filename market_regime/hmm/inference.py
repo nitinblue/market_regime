@@ -39,7 +39,15 @@ class RegimeInference:
         """Predict current regime from recent feature matrix.
 
         Uses Viterbi decode on full sequence, returns the last state's regime.
+
+        Raises:
+            ValueError: If feature_matrix is empty (insufficient data after normalization).
         """
+        if feature_matrix.empty:
+            raise ValueError(
+                f"Cannot predict regime for {ticker}: feature matrix is empty. "
+                "This usually means insufficient OHLCV data for the normalization lookback window."
+            )
         X = feature_matrix.values
         model = self._trainer.model
         lmap = self._trainer.label_map
@@ -85,7 +93,15 @@ class RegimeInference:
     def predict_series(
         self, feature_matrix: pd.DataFrame, ticker: str
     ) -> RegimeTimeSeries:
-        """Predict regime for every date in the feature matrix."""
+        """Predict regime for every date in the feature matrix.
+
+        Raises:
+            ValueError: If feature_matrix is empty.
+        """
+        if feature_matrix.empty:
+            raise ValueError(
+                f"Cannot predict regime series for {ticker}: feature matrix is empty."
+            )
         X = feature_matrix.values
         model = self._trainer.model
         lmap = self._trainer.label_map

@@ -74,6 +74,56 @@ class SupportResistance(BaseModel):
     price_vs_resistance_pct: float | None
 
 
+class VCPStage(StrEnum):
+    NONE = "none"
+    FORMING = "forming"
+    MATURING = "maturing"
+    READY = "ready"
+    BREAKOUT = "breakout"
+
+
+class VCPData(BaseModel):
+    """Volatility Contraction Pattern (Minervini VCP) detection."""
+
+    stage: VCPStage
+    contraction_count: int
+    contraction_pcts: list[float]
+    current_range_pct: float
+    range_compression: float
+    volume_trend: str
+    pivot_price: float | None
+    pivot_distance_pct: float | None
+    days_in_base: int
+    above_sma_50: bool
+    above_sma_200: bool
+    score: float
+    description: str
+
+
+class MarketPhase(StrEnum):
+    """Price-structure-derived market phase (no HMM required)."""
+
+    ACCUMULATION = "accumulation"
+    MARKUP = "markup"
+    DISTRIBUTION = "distribution"
+    MARKDOWN = "markdown"
+
+
+class PhaseIndicator(BaseModel):
+    """Lightweight phase indicator derived purely from price structure."""
+
+    phase: MarketPhase
+    confidence: float  # 0.0–1.0
+    description: str
+    higher_highs: bool
+    higher_lows: bool
+    lower_highs: bool
+    lower_lows: bool
+    range_compression: float  # -1 (expanding) to +1 (compressing)
+    volume_trend: str  # "declining" | "stable" | "rising"
+    price_vs_sma_50_pct: float
+
+
 class TechnicalSnapshot(BaseModel):
     ticker: str
     as_of_date: date
@@ -87,4 +137,6 @@ class TechnicalSnapshot(BaseModel):
     macd: MACDData
     stochastic: StochasticData
     support_resistance: SupportResistance
+    phase: PhaseIndicator
+    vcp: VCPData | None = None
     signals: list[TechnicalSignal]

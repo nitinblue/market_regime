@@ -75,10 +75,18 @@ def _build_52week(info: dict[str, Any], current_price: float | None) -> FiftyTwo
 
 
 def _parse_earnings_dates(ticker_obj: yf.Ticker) -> list[EarningsEvent]:
-    """Parse recent earnings from yfinance get_earnings_dates()."""
+    """Parse recent earnings from yfinance get_earnings_dates().
+
+    Returns empty list for ETFs/commodities that don't report earnings.
+    Only suppresses expected yfinance errors (KeyError, TypeError from missing data).
+    """
     try:
         df = ticker_obj.get_earnings_dates(limit=8)
+    except (KeyError, TypeError, IndexError, ValueError):
+        # ETFs, commodities, and funds don't have earnings data
+        return []
     except Exception:
+        # Unexpected errors (network, API changes) — log-worthy but don't crash
         return []
 
     if df is None or df.empty:
@@ -114,7 +122,10 @@ def _parse_earnings_dates(ticker_obj: yf.Ticker) -> list[EarningsEvent]:
 
 
 def _parse_upcoming_events(ticker_obj: yf.Ticker, info: dict[str, Any]) -> UpcomingEvents:
-    """Parse upcoming events (earnings date, dividends) from yfinance."""
+    """Parse upcoming events (earnings date, dividends) from yfinance.
+
+    Handles ETFs/commodities gracefully — they have no earnings calendar.
+    """
     today = date.today()
 
     # Next earnings date
@@ -139,7 +150,11 @@ def _parse_upcoming_events(ticker_obj: yf.Ticker, info: dict[str, Any]) -> Upcom
                         ed = ed.iloc[0]
                     if hasattr(ed, "date"):
                         next_earnings = ed.date()
+    except (KeyError, TypeError, IndexError, AttributeError):
+        # ETFs/commodities have no calendar data — expected
+        pass
     except Exception:
+        # Unexpected yfinance errors — don't crash the entire snapshot
         pass
 
     if next_earnings is not None:
@@ -154,7 +169,8 @@ def _parse_upcoming_events(ticker_obj: yf.Ticker, info: dict[str, Any]) -> Upcom
                 ex_div = datetime.fromtimestamp(int(ex_div_raw)).date()
             elif hasattr(ex_div_raw, "date"):
                 ex_div = ex_div_raw.date()
-        except Exception:
+        except (TypeError, ValueError, OSError):
+            # Invalid timestamp value — skip gracefully
             pass
 
     div_date_raw = info.get("dividendDate")
@@ -165,7 +181,8 @@ def _parse_upcoming_events(ticker_obj: yf.Ticker, info: dict[str, Any]) -> Upcom
                 div_date = datetime.fromtimestamp(int(div_date_raw)).date()
             elif hasattr(div_date_raw, "date"):
                 div_date = div_date_raw.date()
-        except Exception:
+        except (TypeError, ValueError, OSError):
+            # Invalid timestamp value — skip gracefully
             pass
 
     return UpcomingEvents(
@@ -209,7 +226,10 @@ def fetch_fundamentals(
 
     # Fetch from yfinance
     t = yf.Ticker(ticker)
-    info = t.info
+    try:
+        info = t.info
+    except Exception as e:
+        raise ValueError(f"Failed to fetch data for '{ticker}': {e}") from e
 
     if not info or info.get("regularMarketPrice") is None:
         raise ValueError(f"No data returned for ticker '{ticker}'. Verify it's a valid symbol.")

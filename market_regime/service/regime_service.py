@@ -129,18 +129,30 @@ class RegimeService:
         tickers: list[str] | None = None,
         data: dict[str, pd.DataFrame] | None = None,
     ) -> dict[str, RegimeResult]:
-        """Detect regimes for multiple instruments."""
+        """Detect regimes for multiple instruments.
+
+        Continues processing remaining tickers if one fails.
+        """
         if tickers is None and data is None:
             raise ValueError("Provide either tickers list or data dict")
 
         results: dict[str, RegimeResult] = {}
+        errors: dict[str, str] = {}
         if data is not None:
             for ticker, df in data.items():
-                results[ticker] = self.detect(ticker, df)
+                try:
+                    results[ticker] = self.detect(ticker, df)
+                except Exception as e:
+                    errors[ticker] = str(e)
         elif tickers is not None:
             for ticker in tickers:
-                results[ticker] = self.detect(ticker)
+                try:
+                    results[ticker] = self.detect(ticker)
+                except Exception as e:
+                    errors[ticker] = str(e)
 
+        if errors and not results:
+            raise RuntimeError(f"All tickers failed: {errors}")
         return results
 
     def explain(
@@ -267,15 +279,29 @@ class RegimeService:
         tickers: list[str] | None = None,
         data: dict[str, pd.DataFrame] | None = None,
     ) -> ResearchReport:
-        """Full research for multiple tickers with cross-comparison."""
+        """Full research for multiple tickers with cross-comparison.
+
+        Continues processing remaining tickers if one fails.
+        """
         if tickers is None and data is None:
             raise ValueError("Provide either tickers list or data dict")
 
         ticker_list = tickers if tickers is not None else list(data.keys())
         researches: list[TickerResearch] = []
+        errors: dict[str, str] = {}
         for t in ticker_list:
-            ohlcv = data.get(t) if data is not None else None
-            researches.append(self.research(t, ohlcv))
+            try:
+                ohlcv = data.get(t) if data is not None else None
+                researches.append(self.research(t, ohlcv))
+            except Exception as e:
+                errors[t] = str(e)
+
+        if errors:
+            for t, err in errors.items():
+                print(f"  WARNING: {t} skipped — {err}")
+
+        if not researches:
+            raise RuntimeError(f"All tickers failed: {errors}")
 
         comparison: list[CrossTickerEntry] | None = None
         if len(researches) >= 2:
@@ -437,6 +463,8 @@ def _build_state_means(info: HMMModelInfo) -> list[StateMeansRow]:
 
 def _build_label_alignment(info: HMMModelInfo) -> list[LabelAlignmentDetail]:
     align = info.label_alignment
+    if align is None:
+        return []
     rows: list[LabelAlignmentDetail] = []
     for rid in sorted(align.per_state_vol_mean.keys()):
         v = align.per_state_vol_mean[rid]
@@ -456,16 +484,22 @@ def _build_label_alignment(info: HMMModelInfo) -> list[LabelAlignmentDetail]:
 
 
 def _build_current_features(exp: RegimeExplanation) -> list[FeatureZScore]:
+    if not exp.feature_inspection.normalized_features:
+        return []
     last = exp.feature_inspection.normalized_features[-1]
     rows: list[FeatureZScore] = []
     for k, v in last.items():
         if k == "date":
             continue
+        try:
+            z = float(v)
+        except (TypeError, ValueError):
+            continue
         rows.append(
             FeatureZScore(
                 feature=k,
-                z_score=v,
-                comment=_zscore_comment(k, v),
+                z_score=z,
+                comment=_zscore_comment(k, z),
             )
         )
     return rows
@@ -476,6 +510,8 @@ def _build_recent_history(exp: RegimeExplanation) -> list[RegimeHistoryDay]:
 
     n = get_settings().interpretation.recent_history_days
     all_entries = exp.regime_series.entries
+    if not all_entries:
+        return []
     entries = all_entries[-n:]
     rows: list[RegimeHistoryDay] = []
     for i, entry in enumerate(entries):
@@ -507,10 +543,14 @@ def _build_regime_distribution(exp: RegimeExplanation) -> list[RegimeDistributio
     regime_names = settings.regimes.names
     rare_pct = settings.interpretation.rare_regime_pct
 
+    entries = exp.regime_series.entries
+    if not entries:
+        return []
+
     counts: dict[int, int] = {}
-    for entry in exp.regime_series.entries:
+    for entry in entries:
         counts[entry.regime] = counts.get(entry.regime, 0) + 1
-    total = len(exp.regime_series.entries)
+    total = len(entries)
 
     dominant = max(counts, key=lambda r: counts[r])
     rows: list[RegimeDistributionEntry] = []

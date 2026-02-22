@@ -105,6 +105,12 @@ technicals:
   stochastic_d: 3
   stochastic_overbought: 80.0
   stochastic_oversold: 20.0
+  vcp_lookback_days: 120
+  vcp_min_contractions: 2
+  vcp_min_contraction_pct: 3.0
+  vcp_tightening_ratio: 0.7
+  vcp_ready_range_pct: 5.0
+  vcp_pivot_proximity_pct: 3.0
 
 display:
   default_tickers: ["SPY", "GLD", "QQQ", "TLT"]

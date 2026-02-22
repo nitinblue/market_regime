@@ -1,0 +1,69 @@
+features:
+  log_return_windows: [1, 5]
+  realized_vol_window: 20
+  atr_window: 14
+  trend_window: 20
+  volume_window: 20
+  annualization_factor: 252
+
+regime:
+  n_states: 4
+  training_lookback_years: 2.0
+  feature_lookback_days: 60
+  refit_frequency_days: 30
+
+hmm:
+  covariance_type: "full"
+  n_iter: 100
+  random_state: 42
+
+cache:
+  staleness_hours: 18.0
+  cache_dir: null
+  model_dir: null
+
+interpretation:
+  zscore_thresholds:
+    normal: 0.5
+    mild: 1.0
+    elevated: 2.0
+  stability_thresholds:
+    very_sticky: 0.95
+    sticky: 0.90
+    moderately_stable: 0.80
+  trend_strength_boundary: 0.3
+  rare_regime_pct: 10.0
+  recent_history_days: 20
+
+regimes:
+  names:
+    1: "Low-Vol Mean Reverting"
+    2: "High-Vol Mean Reverting"
+    3: "Low-Vol Trending"
+    4: "High-Vol Trending"
+  strategies:
+    1: "Primary: theta (IC, strangles). Avoid directional."
+    2: "Selective: theta (wider wings). Avoid directional."
+    3: "Primary: directional spreads. Light theta."
+    4: "Selective: directional (risk-defined). Long vega."
+  colors:
+    1: "#4CAF50"
+    2: "#FF9800"
+    3: "#2196F3"
+    4: "#F44336"
+  labels:
+    1: "R1: Low-Vol MR"
+    2: "R2: High-Vol MR"
+    3: "R3: Low-Vol Trend"
+    4: "R4: High-Vol Trend"
+
+display:
+  default_tickers: ["SPY", "GLD", "QQQ", "TLT"]
+  confidence_cap: 99.9
+  plot:
+    figure_size: [14, 7]
+    height_ratios: [3, 1]
+    font_size: 8
+    legend_alpha: 0.9
+    xaxis_rotation: 30
+    month_interval: 2

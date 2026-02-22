@@ -82,6 +82,24 @@ phases:
     3: "LEAP exit zone: take profits, tighten stops. Rotate to protective puts."
     4: "LEAP avoid zone: close bullish LEAPs. Consider bear put LEAPs if R4."
 
+technicals:
+  sma_windows: [20, 50, 200]
+  ema_windows: [9, 21]
+  rsi_period: 14
+  rsi_overbought: 70.0
+  rsi_oversold: 30.0
+  bollinger_window: 20
+  bollinger_std: 2.0
+  macd_fast: 12
+  macd_slow: 26
+  macd_signal: 9
+  vwma_window: 20
+  atr_period: 14
+  stochastic_k: 14
+  stochastic_d: 3
+  stochastic_overbought: 80.0
+  stochastic_oversold: 20.0
+
 display:
   default_tickers: ["SPY", "GLD", "QQQ", "TLT"]
   confidence_cap: 99.9

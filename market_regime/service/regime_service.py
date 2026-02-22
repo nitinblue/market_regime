@@ -16,6 +16,7 @@ from market_regime.hmm.inference import RegimeInference
 from market_regime.hmm.trainer import HMMTrainer
 from market_regime.models.features import FeatureConfig
 from market_regime.models.phase import PhaseResult
+from market_regime.models.technicals import TechnicalSnapshot
 from market_regime.models.regime import (
     CrossTickerEntry,
     FeatureZScore,
@@ -195,6 +196,20 @@ class RegimeService:
         inference = RegimeInference(trainer)
         return inference.predict_series(features, ticker)
 
+    # --- Technicals API ---
+
+    def get_technicals(
+        self, ticker: str, ohlcv: pd.DataFrame | None = None
+    ) -> TechnicalSnapshot:
+        """Compute technical indicators for a single instrument.
+
+        Auto-fetches OHLCV if data_service available and ohlcv not provided.
+        """
+        df = self._get_ohlcv(ticker, ohlcv)
+        from market_regime.features.technicals import compute_technicals
+
+        return compute_technicals(df, ticker)
+
     # --- Phase API ---
 
     def detect_phase(
@@ -352,20 +367,36 @@ def _build_state_means(info: HMMModelInfo) -> list[StateMeansRow]:
         else None
     )
 
+    align = info.label_alignment
+
     for rid in sorted(info.state_means.keys()):
         means = info.state_means[rid]
         feature_means = {
             name: val for name, val in zip(info.feature_names, means)
         }
-        vol_char = "high-vol" if (vol_idx is not None and means[vol_idx] > 0) else "low-vol"
-        from market_regime.config import get_settings
 
-        trend_boundary = get_settings().interpretation.trend_strength_boundary
-        trend_char = (
-            "trending"
-            if (trend_idx is not None and abs(means[trend_idx]) > trend_boundary)
-            else "mean-rev"
-        )
+        # Use alignment thresholds (same ones used to assign regime labels)
+        # so display is always consistent with label assignment
+        if vol_idx is not None and align is not None:
+            vol_char = "high-vol" if means[vol_idx] > align.vol_threshold else "low-vol"
+        else:
+            vol_char = "high-vol" if (vol_idx is not None and means[vol_idx] > 0) else "low-vol"
+
+        if trend_idx is not None and align is not None:
+            trend_char = (
+                "trending"
+                if abs(means[trend_idx]) > align.trend_threshold
+                else "mean-rev"
+            )
+        else:
+            from market_regime.config import get_settings
+            trend_boundary = get_settings().interpretation.trend_strength_boundary
+            trend_char = (
+                "trending"
+                if (trend_idx is not None and abs(means[trend_idx]) > trend_boundary)
+                else "mean-rev"
+            )
+
         rows.append(
             StateMeansRow(
                 regime=RegimeID(rid),

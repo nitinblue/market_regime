@@ -164,12 +164,19 @@ class RegimeInference:
 
         lines.append(tabulate(feat_rows, headers="keys", tablefmt="simple", stralign="right"))
 
-        # Explain quadrant placement
+        # Explain quadrant placement using alignment thresholds for consistency
         vol_val = last_features.get("realized_vol", 0)
         trend_val = last_features.get("trend_strength", 0)
-        vol_desc = "low-vol" if isinstance(vol_val, (int, float)) and vol_val < 0 else "high-vol"
-        trend_boundary = settings.interpretation.trend_strength_boundary
-        trend_desc = "trending" if isinstance(trend_val, (int, float)) and abs(trend_val) > trend_boundary else "mean-reverting"
+        align = self._trainer._alignment
+        if align is not None and isinstance(vol_val, (int, float)):
+            vol_desc = "low-vol" if vol_val <= align.vol_threshold else "high-vol"
+        else:
+            vol_desc = "low-vol" if isinstance(vol_val, (int, float)) and vol_val < 0 else "high-vol"
+        if align is not None and isinstance(trend_val, (int, float)):
+            trend_desc = "trending" if abs(trend_val) > align.trend_threshold else "mean-reverting"
+        else:
+            trend_boundary = settings.interpretation.trend_strength_boundary
+            trend_desc = "trending" if isinstance(trend_val, (int, float)) and abs(trend_val) > trend_boundary else "mean-reverting"
         lines.append(f"\nThis places {ticker} in the {vol_desc} + {trend_desc} quadrant.")
 
         explanation_text = "\n".join(lines)

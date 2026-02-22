@@ -96,6 +96,25 @@ class PlotSettings(BaseModel):
     month_interval: int = 2
 
 
+class TechnicalsSettings(BaseModel):
+    sma_windows: list[int] = Field(default_factory=lambda: [20, 50, 200])
+    ema_windows: list[int] = Field(default_factory=lambda: [9, 21])
+    rsi_period: int = 14
+    rsi_overbought: float = 70.0
+    rsi_oversold: float = 30.0
+    bollinger_window: int = 20
+    bollinger_std: float = 2.0
+    macd_fast: int = 12
+    macd_slow: int = 26
+    macd_signal: int = 9
+    vwma_window: int = 20
+    atr_period: int = 14
+    stochastic_k: int = 14
+    stochastic_d: int = 3
+    stochastic_overbought: float = 80.0
+    stochastic_oversold: float = 20.0
+
+
 class PhaseSettings(BaseModel):
     swing_lookback: int = 5
     swing_threshold_pct: float = 1.5
@@ -141,6 +160,7 @@ class Settings(BaseModel):
     interpretation: InterpretationSettings = Field(default_factory=InterpretationSettings)
     regimes: RegimeDefinitionSettings = Field(default_factory=RegimeDefinitionSettings)
     phases: PhaseSettings = Field(default_factory=PhaseSettings)
+    technicals: TechnicalsSettings = Field(default_factory=TechnicalsSettings)
     display: DisplaySettings = Field(default_factory=DisplaySettings)
 
 

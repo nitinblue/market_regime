@@ -25,6 +25,7 @@ from market_regime.models.regime import (
 from market_regime.models.phase import PhaseID, PhaseResult
 from market_regime.models.data import DataType, ProviderType, DataRequest, DataResult
 from market_regime.models.features import FeatureConfig, FeatureInspection
+from market_regime.models.technicals import TechnicalSnapshot, TechnicalSignal
 
 # Services
 from market_regime.service.regime_service import RegimeService
@@ -35,6 +36,7 @@ from market_regime.phases.detector import PhaseDetector
 
 # Features
 from market_regime.features.pipeline import compute_features
+from market_regime.features.technicals import compute_technicals
 
 __all__ = [
     # Config
@@ -73,6 +75,10 @@ __all__ = [
     # Feature models
     "FeatureConfig",
     "FeatureInspection",
+    # Technical models
+    "TechnicalSnapshot",
+    "TechnicalSignal",
     # Functions
     "compute_features",
+    "compute_technicals",
 ]

@@ -88,8 +88,8 @@ class RegimeDefinitionSettings(BaseModel):
 
 
 class PlotSettings(BaseModel):
-    figure_size: list[int] = Field(default_factory=lambda: [14, 7])
-    height_ratios: list[int] = Field(default_factory=lambda: [3, 1])
+    figure_size: list[float] = Field(default_factory=lambda: [14, 10])
+    height_ratios: list[float] = Field(default_factory=lambda: [5, 1.5, 1.5, 1])
     font_size: int = 8
     legend_alpha: float = 0.9
     xaxis_rotation: int = 30

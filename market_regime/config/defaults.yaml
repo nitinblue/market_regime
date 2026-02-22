@@ -110,8 +110,8 @@ display:
   default_tickers: ["SPY", "GLD", "QQQ", "TLT"]
   confidence_cap: 99.9
   plot:
-    figure_size: [14, 7]
-    height_ratios: [3, 1]
+    figure_size: [14, 10]
+    height_ratios: [5, 1.5, 1.5, 1]
     font_size: 8
     legend_alpha: 0.9
     xaxis_rotation: 30

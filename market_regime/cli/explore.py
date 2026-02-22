@@ -15,6 +15,7 @@ from market_regime.models.regime import (
     CrossTickerEntry,
     ResearchReport,
     TickerResearch,
+    TrendDirection,
 )
 from market_regime.service.regime_service import RegimeService
 
@@ -122,8 +123,8 @@ def print_ticker_research(r: TickerResearch) -> None:
     for day in r.recent_history:
         bar = "#" * int(day.confidence * 20)
         direction = ""
-        if day.trend_direction:
-            direction = "^" if day.trend_direction == "bullish" else "v"
+        if day.trend_direction is not None:
+            direction = "^" if day.trend_direction == TrendDirection.BULLISH else "v"
         comment = ""
         if day.changed_from is not None:
             comment = f"<< changed from R{day.changed_from}"

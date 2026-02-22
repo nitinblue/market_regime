@@ -13,6 +13,7 @@ from market_regime.models.regime import (
     RegimeResult,
     RegimeTimeSeries,
     RegimeTimeSeriesEntry,
+    TrendDirection,
 )
 
 
@@ -25,13 +26,13 @@ class RegimeInference:
         self._trainer = trainer
 
     @staticmethod
-    def _trend_direction(regime: RegimeID, trend_val: float) -> str | None:
+    def _trend_direction(regime: RegimeID, trend_val: float) -> TrendDirection | None:
         """Derive trend direction from regime and trend_strength feature value.
 
-        Returns "bullish"/"bearish" for trending regimes (R3/R4), None for MR.
+        Returns TrendDirection for trending regimes (R3/R4), None for MR.
         """
-        if regime in (RegimeID.R3_LOW_VOL_TREND, RegimeID.R4_HIGH_VOL_TREND):
-            return "bullish" if trend_val >= 0 else "bearish"
+        if regime.is_trending:
+            return TrendDirection.BULLISH if trend_val >= 0 else TrendDirection.BEARISH
         return None
 
     def predict(self, feature_matrix: pd.DataFrame, ticker: str) -> RegimeResult:

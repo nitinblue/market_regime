@@ -23,7 +23,7 @@ from market_regime.models.phase import (
     PhaseResult,
     PhaseTransition,
 )
-from market_regime.models.regime import RegimeID, RegimeTimeSeries
+from market_regime.models.regime import RegimeID, RegimeTimeSeries, TrendDirection
 from market_regime.phases.price_structure import compute_price_structure
 
 
@@ -82,31 +82,23 @@ def _analyze_regime_sequence(
     }
 
 
-def _is_mr_regime(regime: RegimeID) -> bool:
-    return regime in (RegimeID.R1_LOW_VOL_MR, RegimeID.R2_HIGH_VOL_MR)
-
-
-def _is_trending_regime(regime: RegimeID) -> bool:
-    return regime in (RegimeID.R3_LOW_VOL_TREND, RegimeID.R4_HIGH_VOL_TREND)
-
-
 def _classify_phase(
     current_regime: RegimeID,
-    current_trend: str | None,
+    current_trend: TrendDirection | None,
     prior_regime: RegimeID | None,
-    prior_trend: str | None,
+    prior_trend: TrendDirection | None,
     price_structure,
 ) -> tuple[PhaseID, str, str]:
     """Primary classification. Returns (phase, regime_signal, price_signal)."""
     # Trending regimes -> markup or markdown based on direction
-    if _is_trending_regime(current_regime):
-        if current_trend == "bullish":
+    if current_regime.is_trending:
+        if current_trend == TrendDirection.BULLISH:
             return (
                 PhaseID.MARKUP,
                 f"R{current_regime} bullish -> markup",
                 "trending bullish",
             )
-        elif current_trend == "bearish":
+        elif current_trend == TrendDirection.BEARISH:
             return (
                 PhaseID.MARKDOWN,
                 f"R{current_regime} bearish -> markdown",
@@ -139,15 +131,15 @@ def _classify_phase(
         )
 
     # MR regimes -> accumulation or distribution based on prior trend
-    if _is_mr_regime(current_regime):
-        if prior_regime is not None and _is_trending_regime(prior_regime):
-            if prior_trend == "bearish":
+    if current_regime.is_mean_reverting:
+        if prior_regime is not None and prior_regime.is_trending:
+            if prior_trend == TrendDirection.BEARISH:
                 return (
                     PhaseID.ACCUMULATION,
                     f"R{current_regime} following bearish R{prior_regime} -> accumulation",
                     "base-building after decline",
                 )
-            elif prior_trend == "bullish":
+            elif prior_trend == TrendDirection.BULLISH:
                 return (
                     PhaseID.DISTRIBUTION,
                     f"R{current_regime} following bullish R{prior_regime} -> distribution",
@@ -529,8 +521,8 @@ class PhaseDetector:
         prior_phase: PhaseID | None = None
         if seq["prior_regime"] is not None:
             prior_trend = seq["prior_trend_direction"]
-            if _is_trending_regime(seq["prior_regime"]):
-                if prior_trend == "bullish":
+            if seq["prior_regime"].is_trending:
+                if prior_trend == TrendDirection.BULLISH:
                     prior_phase = PhaseID.MARKUP
                 else:
                     prior_phase = PhaseID.MARKDOWN

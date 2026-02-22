@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import date
-from enum import IntEnum
+from enum import IntEnum, StrEnum
 from typing import Any
 
 from pydantic import BaseModel, model_validator
@@ -12,11 +12,32 @@ from market_regime.models.features import FeatureInspection
 from market_regime.models.phase import PhaseID, PhaseResult
 
 
+class TrendDirection(StrEnum):
+    BULLISH = "bullish"
+    BEARISH = "bearish"
+
+
 class RegimeID(IntEnum):
     R1_LOW_VOL_MR = 1
     R2_HIGH_VOL_MR = 2
     R3_LOW_VOL_TREND = 3
     R4_HIGH_VOL_TREND = 4
+
+    @property
+    def is_trending(self) -> bool:
+        return self in (RegimeID.R3_LOW_VOL_TREND, RegimeID.R4_HIGH_VOL_TREND)
+
+    @property
+    def is_mean_reverting(self) -> bool:
+        return self in (RegimeID.R1_LOW_VOL_MR, RegimeID.R2_HIGH_VOL_MR)
+
+    @property
+    def is_high_vol(self) -> bool:
+        return self in (RegimeID.R2_HIGH_VOL_MR, RegimeID.R4_HIGH_VOL_TREND)
+
+    @property
+    def is_low_vol(self) -> bool:
+        return self in (RegimeID.R1_LOW_VOL_MR, RegimeID.R3_LOW_VOL_TREND)
 
 
 class RegimeResult(BaseModel):
@@ -24,7 +45,7 @@ class RegimeResult(BaseModel):
     regime: RegimeID
     confidence: float
     regime_probabilities: dict[int, float]
-    trend_direction: str | None = None  # "bullish", "bearish", or None (MR regimes)
+    trend_direction: TrendDirection | None = None
     as_of_date: date
     model_version: str
 
@@ -84,7 +105,7 @@ class RegimeTimeSeriesEntry(BaseModel):
     regime: RegimeID
     confidence: float
     probabilities: dict[int, float]
-    trend_direction: str | None = None  # "bullish", "bearish", or None (MR regimes)
+    trend_direction: TrendDirection | None = None
 
 
 class RegimeTimeSeries(BaseModel):
@@ -151,7 +172,7 @@ class RegimeHistoryDay(BaseModel):
 
     date: date
     regime: RegimeID
-    trend_direction: str | None = None
+    trend_direction: TrendDirection | None = None
     confidence: float
     changed_from: RegimeID | None = None
 
@@ -189,7 +210,7 @@ class CrossTickerEntry(BaseModel):
 
     ticker: str
     regime: RegimeID
-    trend_direction: str | None = None
+    trend_direction: TrendDirection | None = None
     confidence: float
     regime_probabilities: dict[int, float]
     strategy_comment: str

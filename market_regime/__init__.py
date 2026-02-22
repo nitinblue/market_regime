@@ -21,6 +21,7 @@ from market_regime.models.regime import (
     StateMeansRow,
     TickerResearch,
     TransitionRow,
+    TrendDirection,
 )
 from market_regime.models.phase import PhaseID, PhaseResult
 from market_regime.models.data import DataType, ProviderType, DataRequest, DataResult
@@ -53,6 +54,7 @@ __all__ = [
     "HMMModelInfo",
     "RegimeTimeSeries",
     "RegimeTimeSeriesEntry",
+    "TrendDirection",
     # Phase models
     "PhaseID",
     "PhaseResult",

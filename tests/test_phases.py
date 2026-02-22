@@ -8,12 +8,12 @@ import pytest
 
 from market_regime.config import PhaseSettings, get_settings, reset_settings
 from market_regime.models.phase import PhaseID, PhaseResult
-from market_regime.models.regime import RegimeID, RegimeTimeSeries, RegimeTimeSeriesEntry
+from market_regime.models.regime import RegimeID, RegimeTimeSeries, RegimeTimeSeriesEntry, TrendDirection
 from market_regime.phases.detector import PhaseDetector
 
 
 def _make_regime_series(
-    regimes: list[tuple[int, str | None, int]],
+    regimes: list[tuple[int, TrendDirection | None, int]],
     start_date: str = "2024-01-01",
 ) -> RegimeTimeSeries:
     """Build a RegimeTimeSeries from a compact spec.
@@ -76,14 +76,14 @@ def detector() -> PhaseDetector:
 class TestMarkup:
     def test_bullish_r3_is_markup(self, detector: PhaseDetector):
         """Bullish R3 -> MARKUP."""
-        series = _make_regime_series([(3, "bullish", 30)])
+        series = _make_regime_series([(3, TrendDirection.BULLISH, 30)])
         ohlcv = _make_ohlcv(200, trend=0.002)
         result = detector.detect("TEST", ohlcv, series)
         assert result.phase == PhaseID.MARKUP
 
     def test_bullish_r4_is_markup(self, detector: PhaseDetector):
         """Bullish R4 -> MARKUP."""
-        series = _make_regime_series([(4, "bullish", 30)])
+        series = _make_regime_series([(4, TrendDirection.BULLISH, 30)])
         ohlcv = _make_ohlcv(200, trend=0.003, volatility=0.02)
         result = detector.detect("TEST", ohlcv, series)
         assert result.phase == PhaseID.MARKUP
@@ -92,14 +92,14 @@ class TestMarkup:
 class TestMarkdown:
     def test_bearish_r3_is_markdown(self, detector: PhaseDetector):
         """Bearish R3 -> MARKDOWN."""
-        series = _make_regime_series([(3, "bearish", 30)])
+        series = _make_regime_series([(3, TrendDirection.BEARISH, 30)])
         ohlcv = _make_ohlcv(200, trend=-0.002)
         result = detector.detect("TEST", ohlcv, series)
         assert result.phase == PhaseID.MARKDOWN
 
     def test_bearish_r4_is_markdown(self, detector: PhaseDetector):
         """Bearish R4 -> MARKDOWN."""
-        series = _make_regime_series([(4, "bearish", 30)])
+        series = _make_regime_series([(4, TrendDirection.BEARISH, 30)])
         ohlcv = _make_ohlcv(200, trend=-0.003, volatility=0.02)
         result = detector.detect("TEST", ohlcv, series)
         assert result.phase == PhaseID.MARKDOWN
@@ -109,7 +109,7 @@ class TestAccumulation:
     def test_r1_after_bearish_r3(self, detector: PhaseDetector):
         """R1 following bearish R3 -> ACCUMULATION."""
         series = _make_regime_series([
-            (3, "bearish", 60),
+            (3, TrendDirection.BEARISH, 60),
             (1, None, 20),
         ])
         ohlcv = _make_ohlcv(200, trend=-0.001)
@@ -119,7 +119,7 @@ class TestAccumulation:
     def test_r2_after_bearish_r4(self, detector: PhaseDetector):
         """R2 following bearish R4 -> ACCUMULATION."""
         series = _make_regime_series([
-            (4, "bearish", 60),
+            (4, TrendDirection.BEARISH, 60),
             (2, None, 20),
         ])
         ohlcv = _make_ohlcv(200, trend=-0.002, volatility=0.02)
@@ -131,7 +131,7 @@ class TestDistribution:
     def test_r1_after_bullish_r3(self, detector: PhaseDetector):
         """R1 following bullish R3 -> DISTRIBUTION."""
         series = _make_regime_series([
-            (3, "bullish", 60),
+            (3, TrendDirection.BULLISH, 60),
             (1, None, 20),
         ])
         ohlcv = _make_ohlcv(200, trend=0.001)
@@ -141,7 +141,7 @@ class TestDistribution:
     def test_r2_after_bullish_r4(self, detector: PhaseDetector):
         """R2 following bullish R4 -> DISTRIBUTION."""
         series = _make_regime_series([
-            (4, "bullish", 60),
+            (4, TrendDirection.BULLISH, 60),
             (2, None, 20),
         ])
         ohlcv = _make_ohlcv(200, trend=0.002, volatility=0.02)
@@ -176,7 +176,7 @@ class TestAmbiguousMR:
 class TestConfidence:
     def test_volume_confirms_accumulation(self, detector: PhaseDetector):
         """Declining volume boosts accumulation confidence."""
-        series = _make_regime_series([(3, "bearish", 60), (1, None, 20)])
+        series = _make_regime_series([(3, TrendDirection.BEARISH, 60), (1, None, 20)])
         ohlcv_declining = _make_ohlcv(200, trend=-0.001, volume_trend="declining")
         ohlcv_rising = _make_ohlcv(200, trend=-0.001, volume_trend="rising")
         r_declining = detector.detect("TEST", ohlcv_declining, series)
@@ -185,7 +185,7 @@ class TestConfidence:
 
     def test_confidence_bounded(self, detector: PhaseDetector):
         """Confidence must be in [0.1, 0.95]."""
-        series = _make_regime_series([(3, "bullish", 100)])
+        series = _make_regime_series([(3, TrendDirection.BULLISH, 100)])
         ohlcv = _make_ohlcv(200, trend=0.003)
         result = detector.detect("TEST", ohlcv, series)
         assert 0.10 <= result.confidence <= 0.95
@@ -195,7 +195,7 @@ class TestPhaseAge:
     def test_short_phase_flagged(self, detector: PhaseDetector):
         """Phase under min_phase_days should have contradiction."""
         series = _make_regime_series([
-            (3, "bearish", 60),
+            (3, TrendDirection.BEARISH, 60),
             (1, None, 5),  # Only 5 days
         ])
         ohlcv = _make_ohlcv(200, trend=-0.001)
@@ -207,25 +207,25 @@ class TestFullCycle:
     def test_full_wyckoff_cycle(self, detector: PhaseDetector):
         """Walk through accumulation -> markup -> distribution -> markdown."""
         # Phase 1: Accumulation (R1 after bearish R3)
-        series_accum = _make_regime_series([(3, "bearish", 60), (1, None, 30)])
+        series_accum = _make_regime_series([(3, TrendDirection.BEARISH, 60), (1, None, 30)])
         ohlcv = _make_ohlcv(200, trend=-0.001, volume_trend="declining")
         r1 = detector.detect("TEST", ohlcv, series_accum)
         assert r1.phase == PhaseID.ACCUMULATION
 
         # Phase 2: Markup (bullish R3)
-        series_markup = _make_regime_series([(3, "bullish", 60)])
+        series_markup = _make_regime_series([(3, TrendDirection.BULLISH, 60)])
         ohlcv = _make_ohlcv(200, trend=0.003)
         r2 = detector.detect("TEST", ohlcv, series_markup)
         assert r2.phase == PhaseID.MARKUP
 
         # Phase 3: Distribution (R1 after bullish R3)
-        series_distrib = _make_regime_series([(3, "bullish", 60), (1, None, 30)])
+        series_distrib = _make_regime_series([(3, TrendDirection.BULLISH, 60), (1, None, 30)])
         ohlcv = _make_ohlcv(200, trend=0.001)
         r3 = detector.detect("TEST", ohlcv, series_distrib)
         assert r3.phase == PhaseID.DISTRIBUTION
 
         # Phase 4: Markdown (bearish R3)
-        series_markdown = _make_regime_series([(3, "bearish", 60)])
+        series_markdown = _make_regime_series([(3, TrendDirection.BEARISH, 60)])
         ohlcv = _make_ohlcv(200, trend=-0.003)
         r4 = detector.detect("TEST", ohlcv, series_markdown)
         assert r4.phase == PhaseID.MARKDOWN
@@ -234,7 +234,7 @@ class TestFullCycle:
 class TestPhaseResult:
     def test_serialization_roundtrip(self, detector: PhaseDetector):
         """PhaseResult should serialize/deserialize cleanly."""
-        series = _make_regime_series([(3, "bullish", 60)])
+        series = _make_regime_series([(3, TrendDirection.BULLISH, 60)])
         ohlcv = _make_ohlcv(200, trend=0.002)
         result = detector.detect("TEST", ohlcv, series)
         json_str = result.model_dump_json()
@@ -245,7 +245,7 @@ class TestPhaseResult:
 
     def test_has_transitions(self, detector: PhaseDetector):
         """PhaseResult should include transition probabilities."""
-        series = _make_regime_series([(3, "bullish", 60)])
+        series = _make_regime_series([(3, TrendDirection.BULLISH, 60)])
         ohlcv = _make_ohlcv(200, trend=0.002)
         result = detector.detect("TEST", ohlcv, series)
         assert len(result.transitions) > 0
@@ -254,7 +254,7 @@ class TestPhaseResult:
 
     def test_has_evidence(self, detector: PhaseDetector):
         """PhaseResult should include evidence."""
-        series = _make_regime_series([(3, "bullish", 60)])
+        series = _make_regime_series([(3, TrendDirection.BULLISH, 60)])
         ohlcv = _make_ohlcv(200, trend=0.002)
         result = detector.detect("TEST", ohlcv, series)
         assert result.evidence.regime_signal != ""
@@ -262,7 +262,7 @@ class TestPhaseResult:
 
     def test_strategy_comment_set(self, detector: PhaseDetector):
         """PhaseResult should have a strategy comment."""
-        series = _make_regime_series([(3, "bullish", 60)])
+        series = _make_regime_series([(3, TrendDirection.BULLISH, 60)])
         ohlcv = _make_ohlcv(200, trend=0.002)
         result = detector.detect("TEST", ohlcv, series)
         assert result.strategy_comment != ""
@@ -270,7 +270,7 @@ class TestPhaseResult:
 
     def test_phase_name_matches(self, detector: PhaseDetector):
         """Phase name should match the configured name."""
-        series = _make_regime_series([(3, "bullish", 60)])
+        series = _make_regime_series([(3, TrendDirection.BULLISH, 60)])
         ohlcv = _make_ohlcv(200, trend=0.002)
         result = detector.detect("TEST", ohlcv, series)
         settings = get_settings()

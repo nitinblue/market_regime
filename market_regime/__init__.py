@@ -35,6 +35,14 @@ from market_regime.data.service import DataService
 # Phase detection
 from market_regime.phases.detector import PhaseDetector
 
+# Fundamentals
+from market_regime.models.fundamentals import FundamentalsSnapshot
+from market_regime.fundamentals.fetch import fetch_fundamentals
+
+# Macro
+from market_regime.models.macro import MacroCalendar, MacroEvent, MacroEventType
+from market_regime.macro.calendar import get_macro_calendar
+
 # Features
 from market_regime.features.pipeline import compute_features
 from market_regime.features.technicals import compute_technicals
@@ -80,6 +88,14 @@ __all__ = [
     # Technical models
     "TechnicalSnapshot",
     "TechnicalSignal",
+    # Fundamentals
+    "FundamentalsSnapshot",
+    "fetch_fundamentals",
+    # Macro
+    "MacroCalendar",
+    "MacroEvent",
+    "MacroEventType",
+    "get_macro_calendar",
     # Functions
     "compute_features",
     "compute_technicals",

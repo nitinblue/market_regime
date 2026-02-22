@@ -159,9 +159,15 @@ def compute_price_structure(ohlcv: pd.DataFrame, settings: PhaseSettings) -> Pri
         ohlcv["Volume"], settings.volume_trend_window, settings.volume_decline_threshold
     )
 
-    # Support/resistance from most recent unbroken swing points
-    support_level = low_prices[-1] if low_prices else None
-    resistance_level = high_prices[-1] if high_prices else None
+    # Support = nearest swing low BELOW current price (search backward)
+    current_close = float(ohlcv["Close"].iloc[-1])
+    support_level = next(
+        (p for p in reversed(low_prices) if p < current_close), None
+    )
+    # Resistance = nearest swing high ABOVE current price (search backward)
+    resistance_level = next(
+        (p for p in reversed(high_prices) if p > current_close), None
+    )
 
     return PriceStructure(
         swing_highs=swing_highs,

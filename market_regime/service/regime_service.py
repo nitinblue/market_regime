@@ -38,6 +38,8 @@ from market_regime.phases.detector import PhaseDetector
 
 if TYPE_CHECKING:
     from market_regime.data.service import DataService
+    from market_regime.models.fundamentals import FundamentalsSnapshot
+    from market_regime.models.macro import MacroCalendar
 
 def _default_model_dir() -> Path:
     from market_regime.config import get_settings
@@ -223,6 +225,31 @@ class RegimeService:
         regime_series = self.get_regime_history(ticker, df)
         detector = PhaseDetector()
         return detector.detect(ticker, df, regime_series)
+
+    # --- Fundamentals API ---
+
+    def get_fundamentals(
+        self, ticker: str, ttl_minutes: int | None = None
+    ) -> "FundamentalsSnapshot":
+        """Fetch stock fundamentals for a single instrument.
+
+        Uses yfinance with in-memory TTL cache.
+        """
+        from market_regime.fundamentals.fetch import fetch_fundamentals
+
+        return fetch_fundamentals(ticker, ttl_minutes=ttl_minutes)
+
+    # --- Macro Calendar API ---
+
+    def get_macro_calendar(
+        self,
+        as_of: date | None = None,
+        lookahead_days: int | None = None,
+    ) -> "MacroCalendar":
+        """Get macro economic calendar (FOMC, CPI, NFP, PCE, GDP)."""
+        from market_regime.macro.calendar import get_macro_calendar
+
+        return get_macro_calendar(as_of=as_of, lookahead_days=lookahead_days)
 
     # --- Research API ---
 

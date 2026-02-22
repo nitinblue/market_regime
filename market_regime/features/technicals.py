@@ -397,8 +397,14 @@ def compute_technicals(
     swing_highs = detect_swing_highs(high, phase_settings.swing_lookback, phase_settings.swing_threshold_pct)
     swing_lows = detect_swing_lows(low, phase_settings.swing_lookback, phase_settings.swing_threshold_pct)
 
-    support_price = swing_lows[-1].price if swing_lows else None
-    resistance_price = swing_highs[-1].price if swing_highs else None
+    # Support = nearest swing low BELOW current price (search backward)
+    support_price = next(
+        (s.price for s in reversed(swing_lows) if s.price < price), None
+    )
+    # Resistance = nearest swing high ABOVE current price (search backward)
+    resistance_price = next(
+        (s.price for s in reversed(swing_highs) if s.price > price), None
+    )
 
     sr = SupportResistance(
         support=support_price,

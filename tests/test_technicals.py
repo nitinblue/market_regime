@@ -192,6 +192,33 @@ class TestSupportResistance:
         # With 250 bars of data, we should find swing points
         assert sr.support is not None or sr.resistance is not None
 
+    def test_support_below_price(self, sample_ohlcv_trending: pd.DataFrame):
+        """Regression: support must be below current price."""
+        snapshot = compute_technicals(sample_ohlcv_trending, "TEST")
+        sr = snapshot.support_resistance
+        if sr.support is not None:
+            assert sr.support < snapshot.current_price, (
+                f"Support {sr.support} should be below price {snapshot.current_price}"
+            )
+
+    def test_resistance_above_price(self, sample_ohlcv_trending: pd.DataFrame):
+        """Regression: resistance must be above current price."""
+        snapshot = compute_technicals(sample_ohlcv_trending, "TEST")
+        sr = snapshot.support_resistance
+        if sr.resistance is not None:
+            assert sr.resistance > snapshot.current_price, (
+                f"Resistance {sr.resistance} should be above price {snapshot.current_price}"
+            )
+
+    def test_sr_correctness_choppy(self, sample_ohlcv_choppy: pd.DataFrame):
+        """Support < price and resistance > price in choppy data too."""
+        snapshot = compute_technicals(sample_ohlcv_choppy, "CHOP")
+        sr = snapshot.support_resistance
+        if sr.support is not None:
+            assert sr.support < snapshot.current_price
+        if sr.resistance is not None:
+            assert sr.resistance > snapshot.current_price
+
     def test_sr_none_when_no_swings(self):
         # Very short data — no swings detectable
         dates = pd.bdate_range("2024-01-01", periods=5)

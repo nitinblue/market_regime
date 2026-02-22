@@ -144,6 +144,14 @@ class PhaseSettings(BaseModel):
     })
 
 
+class FundamentalsSettings(BaseModel):
+    cache_ttl_minutes: int = 60
+
+
+class MacroSettings(BaseModel):
+    lookahead_days: int = 60
+
+
 class DisplaySettings(BaseModel):
     default_tickers: list[str] = Field(default_factory=lambda: ["SPY", "GLD", "QQQ", "TLT"])
     confidence_cap: float = 99.9
@@ -161,6 +169,8 @@ class Settings(BaseModel):
     regimes: RegimeDefinitionSettings = Field(default_factory=RegimeDefinitionSettings)
     phases: PhaseSettings = Field(default_factory=PhaseSettings)
     technicals: TechnicalsSettings = Field(default_factory=TechnicalsSettings)
+    fundamentals: FundamentalsSettings = Field(default_factory=FundamentalsSettings)
+    macro: MacroSettings = Field(default_factory=MacroSettings)
     display: DisplaySettings = Field(default_factory=DisplaySettings)
 
 

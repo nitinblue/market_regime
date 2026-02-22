@@ -82,6 +82,12 @@ phases:
     3: "LEAP exit zone: take profits, tighten stops. Rotate to protective puts."
     4: "LEAP avoid zone: close bullish LEAPs. Consider bear put LEAPs if R4."
 
+fundamentals:
+  cache_ttl_minutes: 60
+
+macro:
+  lookahead_days: 60
+
 technicals:
   sma_windows: [20, 50, 200]
   ema_windows: [9, 21]

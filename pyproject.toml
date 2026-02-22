@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "market-regime"
-version = "0.1.0"
+version = "0.2.0"
 description = "Historical market data service and HMM-based regime detection for options trading"
 requires-python = ">=3.11"
 dependencies = [

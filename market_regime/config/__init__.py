@@ -96,6 +96,35 @@ class PlotSettings(BaseModel):
     month_interval: int = 2
 
 
+class PhaseSettings(BaseModel):
+    swing_lookback: int = 5
+    swing_threshold_pct: float = 1.5
+    min_phase_days: int = 10
+    volume_trend_window: int = 20
+    volume_decline_threshold: float = 0.8
+    range_analysis_window: int = 30
+    sma_period: int = 50
+    min_regime_run_days: int = 5
+    names: dict[int, str] = Field(default_factory=lambda: {
+        1: "Accumulation",
+        2: "Markup",
+        3: "Distribution",
+        4: "Markdown",
+    })
+    colors: dict[int, str] = Field(default_factory=lambda: {
+        1: "#8BC34A",
+        2: "#4CAF50",
+        3: "#FF5722",
+        4: "#D32F2F",
+    })
+    strategies: dict[int, str] = Field(default_factory=lambda: {
+        1: "LEAP entry zone: buy calls on dips to support. Low IV = cheap options.",
+        2: "LEAP hold zone: ride existing LEAPs. Trail stops. Add on pullbacks.",
+        3: "LEAP exit zone: take profits, tighten stops. Rotate to protective puts.",
+        4: "LEAP avoid zone: close bullish LEAPs. Consider bear put LEAPs if R4.",
+    })
+
+
 class DisplaySettings(BaseModel):
     default_tickers: list[str] = Field(default_factory=lambda: ["SPY", "GLD", "QQQ", "TLT"])
     confidence_cap: float = 99.9
@@ -111,6 +140,7 @@ class Settings(BaseModel):
     cache: CacheSettings = Field(default_factory=CacheSettings)
     interpretation: InterpretationSettings = Field(default_factory=InterpretationSettings)
     regimes: RegimeDefinitionSettings = Field(default_factory=RegimeDefinitionSettings)
+    phases: PhaseSettings = Field(default_factory=PhaseSettings)
     display: DisplaySettings = Field(default_factory=DisplaySettings)
 
 

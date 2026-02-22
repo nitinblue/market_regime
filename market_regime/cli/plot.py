@@ -15,6 +15,7 @@ import numpy as np
 
 from market_regime.config import get_settings
 from market_regime.data.service import DataService
+from market_regime.models.phase import PhaseResult
 from market_regime.models.regime import RegimeExplanation, RegimeID
 from market_regime.service.regime_service import RegimeService
 
@@ -36,6 +37,7 @@ def plot_ticker(
     explanation: RegimeExplanation,
     ohlcv_df,
     save: bool = False,
+    phase_result: PhaseResult | None = None,
 ) -> None:
     """Two-panel chart: price with regime bands (top), confidence bars (bottom)."""
     settings = get_settings()
@@ -109,6 +111,22 @@ def plot_ticker(
         fontsize=plot_cfg.font_size, framealpha=plot_cfg.legend_alpha,
     )
 
+    # Phase annotation (upper right)
+    if phase_result is not None:
+        phase_text = f"Phase: {phase_result.phase_name} ({phase_result.confidence:.0%})"
+        ax_price.text(
+            0.98, 0.95, phase_text,
+            transform=ax_price.transAxes,
+            fontsize=plot_cfg.font_size + 1,
+            fontweight="bold",
+            ha="right", va="top",
+            bbox=dict(
+                boxstyle="round,pad=0.3",
+                facecolor=get_settings().phases.colors.get(int(phase_result.phase), "#888888"),
+                alpha=0.3,
+            ),
+        )
+
     # --- Bottom panel: confidence bars ---
     bar_colors = [regime_colors[r] for r in regimes]
     ax_conf.bar(dates, confidences, color=bar_colors, width=1.0, alpha=0.7)
@@ -149,12 +167,16 @@ def main() -> None:
     data_svc = DataService()
     regime_svc = RegimeService(data_service=data_svc)
 
+    from market_regime.phases.detector import PhaseDetector
+
+    phase_detector = PhaseDetector()
     for ticker in args.tickers:
         print(f"Processing {ticker}...")
         try:
             explanation = regime_svc.explain(ticker)
             ohlcv = data_svc.get_ohlcv(ticker)
-            plot_ticker(ticker, explanation, ohlcv, save=args.save)
+            phase = phase_detector.detect(ticker, ohlcv, explanation.regime_series)
+            plot_ticker(ticker, explanation, ohlcv, save=args.save, phase_result=phase)
         except Exception as e:
             print(f"  ERROR on {ticker}: {e}")
 

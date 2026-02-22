@@ -25,6 +25,47 @@ def print_section(title: str) -> None:
     print(f"{'=' * 72}")
 
 
+def print_phase_analysis(r: TickerResearch) -> None:
+    """Print Wyckoff phase analysis section."""
+    phase = r.phase_result
+    if phase is None:
+        return
+
+    print("\n--- Wyckoff Phase Analysis ---")
+    print(f"  Phase          {phase.phase_name} (P{phase.phase})")
+    print(f"  Confidence     {phase.confidence:.0%}")
+    print(f"  Phase Age      {phase.phase_age_days} days")
+    if phase.prior_phase is not None:
+        from market_regime.config import get_settings
+        phase_names = get_settings().phases.names
+        prior_name = phase_names.get(int(phase.prior_phase), f"P{phase.prior_phase}")
+        print(f"  Prior Phase    P{phase.prior_phase} ({prior_name})")
+    print(f"  Cycle Position {phase.cycle_completion:.0%}")
+
+    ev = phase.evidence
+    print(f"\n  Regime signal: {ev.regime_signal}")
+    print(f"  Price signal:  {ev.price_signal}")
+    print(f"  Volume signal: {ev.volume_signal}")
+
+    if ev.supporting:
+        print("\n  Supporting:")
+        for s in ev.supporting:
+            print(f"    + {s}")
+    if ev.contradictions:
+        print("\n  Contradictions:")
+        for c in ev.contradictions:
+            print(f"    - {c}")
+
+    if phase.transitions:
+        print("\n  Transition outlook:")
+        for t in phase.transitions:
+            trigger_str = ", ".join(t.triggers)
+            print(f"    -> {get_settings().phases.names.get(int(t.to_phase), f'P{t.to_phase}')}: "
+                  f"{t.probability:.0%}  (trigger: {trigger_str})")
+
+    print(f"\n  LEAP Strategy: {phase.strategy_comment}")
+
+
 def print_ticker_research(r: TickerResearch) -> None:
     print_section(f"{r.ticker} — Full Regime Explanation")
 
@@ -116,6 +157,9 @@ def print_ticker_research(r: TickerResearch) -> None:
         })
     print(tabulate(rows, headers="keys", tablefmt="simple", stralign="right"))
 
+    # --- Wyckoff Phase ---
+    print_phase_analysis(r)
+
 
 def print_comparison(comparison: list[CrossTickerEntry]) -> None:
     print_section("Cross-Ticker Comparison")
@@ -125,9 +169,11 @@ def print_comparison(comparison: list[CrossTickerEntry]) -> None:
         probs = " ".join(
             f"R{k}:{v:.0%}" for k, v in sorted(c.regime_probabilities.items())
         )
+        phase_str = f"P{c.phase} ({c.phase_name})" if c.phase is not None else ""
         rows.append({
             "Ticker": c.ticker,
             "Regime": f"R{c.regime}",
+            "Phase": phase_str,
             "Direction": c.trend_direction or "",
             "Confidence": f"{min(c.confidence * 100, get_settings().display.confidence_cap):.1f}%",
             "Probabilities": probs,

@@ -9,6 +9,7 @@ from typing import Any
 from pydantic import BaseModel, model_validator
 
 from market_regime.models.features import FeatureInspection
+from market_regime.models.phase import PhaseID, PhaseResult
 
 
 class RegimeID(IntEnum):
@@ -180,6 +181,7 @@ class TickerResearch(BaseModel):
     regime_distribution: list[RegimeDistributionEntry]
     strategy_comment: str
     model_info: HMMModelInfo
+    phase_result: PhaseResult | None = None
 
 
 class CrossTickerEntry(BaseModel):
@@ -191,6 +193,8 @@ class CrossTickerEntry(BaseModel):
     confidence: float
     regime_probabilities: dict[int, float]
     strategy_comment: str
+    phase: PhaseID | None = None
+    phase_name: str | None = None
 
 
 class ResearchReport(BaseModel):

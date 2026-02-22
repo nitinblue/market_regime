@@ -57,6 +57,31 @@ regimes:
     3: "R3: Low-Vol Trend"
     4: "R4: High-Vol Trend"
 
+phases:
+  swing_lookback: 5
+  swing_threshold_pct: 1.5
+  min_phase_days: 10
+  volume_trend_window: 20
+  volume_decline_threshold: 0.8
+  range_analysis_window: 30
+  sma_period: 50
+  min_regime_run_days: 5
+  names:
+    1: "Accumulation"
+    2: "Markup"
+    3: "Distribution"
+    4: "Markdown"
+  colors:
+    1: "#8BC34A"
+    2: "#4CAF50"
+    3: "#FF5722"
+    4: "#D32F2F"
+  strategies:
+    1: "LEAP entry zone: buy calls on dips to support. Low IV = cheap options."
+    2: "LEAP hold zone: ride existing LEAPs. Trail stops. Add on pullbacks."
+    3: "LEAP exit zone: take profits, tighten stops. Rotate to protective puts."
+    4: "LEAP avoid zone: close bullish LEAPs. Consider bear put LEAPs if R4."
+
 display:
   default_tickers: ["SPY", "GLD", "QQQ", "TLT"]
   confidence_cap: 99.9

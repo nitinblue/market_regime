@@ -22,12 +22,16 @@ from market_regime.models.regime import (
     TickerResearch,
     TransitionRow,
 )
+from market_regime.models.phase import PhaseID, PhaseResult
 from market_regime.models.data import DataType, ProviderType, DataRequest, DataResult
 from market_regime.models.features import FeatureConfig, FeatureInspection
 
 # Services
 from market_regime.service.regime_service import RegimeService
 from market_regime.data.service import DataService
+
+# Phase detection
+from market_regime.phases.detector import PhaseDetector
 
 # Features
 from market_regime.features.pipeline import compute_features
@@ -47,6 +51,10 @@ __all__ = [
     "HMMModelInfo",
     "RegimeTimeSeries",
     "RegimeTimeSeriesEntry",
+    # Phase models
+    "PhaseID",
+    "PhaseResult",
+    "PhaseDetector",
     # Research models
     "TickerResearch",
     "CrossTickerEntry",

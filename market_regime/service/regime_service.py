@@ -15,6 +15,7 @@ from market_regime.features.pipeline import (
 from market_regime.hmm.inference import RegimeInference
 from market_regime.hmm.trainer import HMMTrainer
 from market_regime.models.features import FeatureConfig
+from market_regime.models.phase import PhaseResult
 from market_regime.models.regime import (
     CrossTickerEntry,
     FeatureZScore,
@@ -32,6 +33,7 @@ from market_regime.models.regime import (
     TickerResearch,
     TransitionRow,
 )
+from market_regime.phases.detector import PhaseDetector
 
 if TYPE_CHECKING:
     from market_regime.data.service import DataService
@@ -193,14 +195,30 @@ class RegimeService:
         inference = RegimeInference(trainer)
         return inference.predict_series(features, ticker)
 
+    # --- Phase API ---
+
+    def detect_phase(
+        self, ticker: str, ohlcv: pd.DataFrame | None = None
+    ) -> PhaseResult:
+        """Detect Wyckoff phase for a single instrument.
+
+        Requires regime series (auto-fits if needed) and OHLCV data.
+        """
+        df = self._get_ohlcv(ticker, ohlcv)
+        regime_series = self.get_regime_history(ticker, df)
+        detector = PhaseDetector()
+        return detector.detect(ticker, df, regime_series)
+
     # --- Research API ---
 
     def research(
         self, ticker: str, ohlcv: pd.DataFrame | None = None
     ) -> TickerResearch:
         """Full interpreted regime research for a single ticker."""
-        exp = self.explain(ticker, ohlcv)
-        return _build_ticker_research(exp)
+        df = self._get_ohlcv(ticker, ohlcv)
+        exp = self.explain(ticker, df)
+        phase = PhaseDetector().detect(ticker, df, exp.regime_series)
+        return _build_ticker_research(exp, phase)
 
     def research_batch(
         self,
@@ -227,6 +245,8 @@ class RegimeService:
                     confidence=r.regime_result.confidence,
                     regime_probabilities=r.regime_result.regime_probabilities,
                     strategy_comment=r.strategy_comment,
+                    phase=r.phase_result.phase if r.phase_result else None,
+                    phase_name=r.phase_result.phase_name if r.phase_result else None,
                 )
                 for r in researches
             ]
@@ -451,7 +471,10 @@ def _build_regime_distribution(exp: RegimeExplanation) -> list[RegimeDistributio
     return rows
 
 
-def _build_ticker_research(exp: RegimeExplanation) -> TickerResearch:
+def _build_ticker_research(
+    exp: RegimeExplanation,
+    phase: PhaseResult | None = None,
+) -> TickerResearch:
     result = exp.regime_result
     info = exp.model_info
     return TickerResearch(
@@ -466,4 +489,5 @@ def _build_ticker_research(exp: RegimeExplanation) -> TickerResearch:
         regime_distribution=_build_regime_distribution(exp),
         strategy_comment=_regime_strategies().get(int(result.regime), ""),
         model_info=info,
+        phase_result=phase,
     )

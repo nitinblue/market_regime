@@ -16,7 +16,7 @@ from market_regime.hmm.inference import RegimeInference
 from market_regime.hmm.trainer import HMMTrainer
 from market_regime.models.features import FeatureConfig
 from market_regime.models.phase import PhaseResult
-from market_regime.models.technicals import TechnicalSnapshot
+from market_regime.models.technicals import ORBData, TechnicalSnapshot
 from market_regime.models.regime import (
     CrossTickerEntry,
     FeatureZScore,
@@ -35,6 +35,8 @@ from market_regime.models.regime import (
     TransitionRow,
 )
 from market_regime.phases.detector import PhaseDetector
+
+from market_regime.models.opportunity import LEAPOpportunity, ZeroDTEOpportunity
 
 if TYPE_CHECKING:
     from market_regime.data.service import DataService
@@ -224,6 +226,50 @@ class RegimeService:
 
         return compute_technicals(df, ticker)
 
+    # --- ORB API ---
+
+    def get_orb(
+        self,
+        ticker: str,
+        intraday: pd.DataFrame | None = None,
+        daily_atr: float | None = None,
+    ) -> ORBData:
+        """Compute Opening Range Breakout levels from intraday data.
+
+        Args:
+            ticker: Instrument ticker.
+            intraday: Intraday OHLCV DataFrame (1m/5m bars).
+                      If None and data_service available, fetches via yfinance.
+            daily_atr: Optional daily ATR for context. Auto-computed if
+                       data_service available and daily_atr is None.
+        """
+        from market_regime.features.orb import compute_orb
+
+        if intraday is None:
+            import yfinance as yf
+
+            intraday = yf.download(ticker, period="1d", interval="5m", progress=False)
+            if intraday.empty:
+                raise ValueError(f"No intraday data available for {ticker}")
+            # Flatten MultiIndex columns if present
+            if isinstance(intraday.columns, pd.MultiIndex):
+                intraday.columns = intraday.columns.get_level_values(0)
+
+        if daily_atr is None and self.data_service is not None:
+            try:
+                from market_regime.features.technicals import compute_atr
+
+                ohlcv = self.data_service.get_ohlcv(ticker)
+                atr_series = compute_atr(
+                    ohlcv["High"], ohlcv["Low"], ohlcv["Close"], 14
+                )
+                if not atr_series.empty and not pd.isna(atr_series.iloc[-1]):
+                    daily_atr = float(atr_series.iloc[-1])
+            except Exception:
+                pass  # ATR is optional context; don't fail ORB over it
+
+        return compute_orb(intraday, ticker, daily_atr=daily_atr)
+
     # --- Phase API ---
 
     def detect_phase(
@@ -262,6 +308,82 @@ class RegimeService:
         from market_regime.macro.calendar import get_macro_calendar
 
         return get_macro_calendar(as_of=as_of, lookahead_days=lookahead_days)
+
+    # --- Opportunity Assessment API ---
+
+    def assess_zero_dte(
+        self,
+        ticker: str,
+        ohlcv: pd.DataFrame | None = None,
+        intraday: pd.DataFrame | None = None,
+        as_of: date | None = None,
+    ) -> ZeroDTEOpportunity:
+        """Assess 0DTE opportunity for a single instrument.
+
+        Gathers regime, technicals, ORB, macro, and fundamentals, then
+        delegates to the pure assessment function.
+        """
+        from market_regime.opportunity.zero_dte import assess_zero_dte as _assess
+
+        df = self._get_ohlcv(ticker, ohlcv)
+        regime = self.detect(ticker, df)
+        technicals = self.get_technicals(ticker, df)
+        macro = self.get_macro_calendar(as_of=as_of)
+
+        orb = None
+        if intraday is not None:
+            orb = self.get_orb(ticker, intraday=intraday, daily_atr=technicals.atr)
+
+        fundamentals = None
+        try:
+            fundamentals = self.get_fundamentals(ticker)
+        except Exception:
+            pass
+
+        return _assess(
+            ticker=ticker,
+            regime=regime,
+            technicals=technicals,
+            macro=macro,
+            fundamentals=fundamentals,
+            orb=orb,
+            as_of=as_of,
+        )
+
+    def assess_leap(
+        self,
+        ticker: str,
+        ohlcv: pd.DataFrame | None = None,
+        as_of: date | None = None,
+    ) -> LEAPOpportunity:
+        """Assess LEAP opportunity for a single instrument.
+
+        Gathers regime, technicals, phase, macro, and fundamentals, then
+        delegates to the pure assessment function.
+        """
+        from market_regime.opportunity.leap import assess_leap as _assess
+
+        df = self._get_ohlcv(ticker, ohlcv)
+        regime = self.detect(ticker, df)
+        technicals = self.get_technicals(ticker, df)
+        phase = self.detect_phase(ticker, df)
+        macro = self.get_macro_calendar(as_of=as_of)
+
+        fundamentals = None
+        try:
+            fundamentals = self.get_fundamentals(ticker)
+        except Exception:
+            pass
+
+        return _assess(
+            ticker=ticker,
+            regime=regime,
+            technicals=technicals,
+            phase=phase,
+            macro=macro,
+            fundamentals=fundamentals,
+            as_of=as_of,
+        )
 
     # --- Research API ---
 

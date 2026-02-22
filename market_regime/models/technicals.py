@@ -124,6 +124,98 @@ class PhaseIndicator(BaseModel):
     price_vs_sma_50_pct: float
 
 
+class OrderBlockType(StrEnum):
+    BULLISH = "bullish"  # Demand zone: last bearish candle before impulse up
+    BEARISH = "bearish"  # Supply zone: last bullish candle before impulse down
+
+
+class OrderBlock(BaseModel):
+    """A single detected order block zone."""
+
+    type: OrderBlockType
+    date: date
+    high: float  # Top of the OB zone
+    low: float  # Bottom of the OB zone
+    volume: float
+    impulse_strength: float  # Impulse move as multiple of ATR
+    is_tested: bool  # Has price returned to this zone?
+    is_broken: bool  # Has price broken through?
+    distance_pct: float  # Current price distance from zone midpoint
+
+
+class FVGType(StrEnum):
+    BULLISH = "bullish"  # Gap up: candle1.high < candle3.low
+    BEARISH = "bearish"  # Gap down: candle1.low > candle3.high
+
+
+class FairValueGap(BaseModel):
+    """A single detected fair value gap."""
+
+    type: FVGType
+    date: date
+    high: float  # Top of gap
+    low: float  # Bottom of gap
+    gap_size_pct: float  # Gap width as % of price
+    is_filled: bool  # Has price completely filled the gap?
+    fill_pct: float  # How much of gap has been filled (0–100)
+    distance_pct: float  # Current price distance from gap midpoint
+
+
+class SmartMoneyData(BaseModel):
+    """Order Block and Fair Value Gap detection (Smart Money Concepts)."""
+
+    order_blocks: list[OrderBlock]
+    fair_value_gaps: list[FairValueGap]
+    nearest_bullish_ob: OrderBlock | None
+    nearest_bearish_ob: OrderBlock | None
+    nearest_bullish_fvg: FairValueGap | None
+    nearest_bearish_fvg: FairValueGap | None
+    unfilled_fvg_count: int
+    active_ob_count: int  # Not broken
+    score: float  # 0.0–1.0 composite confluence score
+    description: str
+
+
+class ORBStatus(StrEnum):
+    WITHIN = "within"
+    BREAKOUT_LONG = "breakout_long"
+    BREAKOUT_SHORT = "breakout_short"
+    FAILED_LONG = "failed_long"
+    FAILED_SHORT = "failed_short"
+
+
+class ORBLevel(BaseModel):
+    """A single ORB extension level."""
+
+    label: str
+    price: float
+    distance_pct: float
+
+
+class ORBData(BaseModel):
+    """Opening Range Breakout analysis from intraday data."""
+
+    ticker: str
+    date: date
+    opening_minutes: int
+    range_high: float
+    range_low: float
+    range_size: float
+    range_pct: float
+    current_price: float
+    status: ORBStatus
+    levels: list[ORBLevel]
+    session_high: float
+    session_low: float
+    session_vwap: float | None
+    opening_volume_ratio: float
+    range_vs_daily_atr_pct: float | None
+    breakout_bar_index: int | None
+    retest_count: int
+    signals: list[TechnicalSignal]
+    description: str
+
+
 class TechnicalSnapshot(BaseModel):
     ticker: str
     as_of_date: date
@@ -139,4 +231,5 @@ class TechnicalSnapshot(BaseModel):
     support_resistance: SupportResistance
     phase: PhaseIndicator
     vcp: VCPData | None = None
+    smart_money: SmartMoneyData | None = None
     signals: list[TechnicalSignal]

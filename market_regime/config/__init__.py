@@ -119,6 +119,13 @@ class TechnicalsSettings(BaseModel):
     vcp_tightening_ratio: float = 0.7
     vcp_ready_range_pct: float = 5.0
     vcp_pivot_proximity_pct: float = 3.0
+    ob_lookback_days: int = 60
+    ob_impulse_atr_multiple: float = 2.0
+    ob_min_volume_factor: float = 1.3
+    ob_max_blocks: int = 5
+    fvg_lookback_days: int = 60
+    fvg_min_gap_pct: float = 0.3
+    fvg_max_gaps: int = 5
 
 
 class PhaseSettings(BaseModel):
@@ -158,6 +165,55 @@ class MacroSettings(BaseModel):
     lookahead_days: int = 60
 
 
+class ZeroDTESettings(BaseModel):
+    earnings_blackout_days: int = 1
+    min_atr_pct: float = 0.3
+    max_atr_pct: float = 3.0
+    r4_confidence_threshold: float = 0.7
+    go_threshold: float = 0.55
+    caution_threshold: float = 0.35
+    atr_sweet_low: float = 0.5
+    atr_sweet_high: float = 1.5
+    regime_multipliers: dict[int, float] = Field(default_factory=lambda: {
+        1: 1.0, 2: 0.85, 3: 0.6, 4: 0.3,
+    })
+
+
+class LEAPSettings(BaseModel):
+    earnings_blackout_days: int = 5
+    r4_confidence_threshold: float = 0.7
+    distribution_confidence_threshold: float = 0.65
+    markdown_confidence_threshold: float = 0.65
+    min_fundamental_score: float = 0.2
+    go_threshold: float = 0.50
+    caution_threshold: float = 0.30
+    earnings_growth_strong: float = 0.15
+    earnings_growth_moderate: float = 0.05
+    revenue_growth_strong: float = 0.15
+    revenue_growth_moderate: float = 0.05
+    margin_strong: float = 0.20
+    margin_moderate: float = 0.10
+    debt_low: float = 50.0
+    debt_moderate: float = 100.0
+    debt_high: float = 200.0
+    pe_cheap: float = 15.0
+    pe_fair: float = 25.0
+    pe_expensive: float = 40.0
+    bull_entry_52wk_pct: float = 40.0
+
+
+class OpportunitySettings(BaseModel):
+    zero_dte: ZeroDTESettings = Field(default_factory=ZeroDTESettings)
+    leap: LEAPSettings = Field(default_factory=LEAPSettings)
+
+
+class ORBSettings(BaseModel):
+    opening_minutes: int = 30
+    extensions: list[float] = Field(default_factory=lambda: [1.0, 1.5, 2.0])
+    market_open_hour: int = 9
+    market_open_minute: int = 30
+
+
 class DisplaySettings(BaseModel):
     default_tickers: list[str] = Field(default_factory=lambda: ["SPY", "GLD", "QQQ", "TLT"])
     confidence_cap: float = 99.9
@@ -177,6 +233,8 @@ class Settings(BaseModel):
     technicals: TechnicalsSettings = Field(default_factory=TechnicalsSettings)
     fundamentals: FundamentalsSettings = Field(default_factory=FundamentalsSettings)
     macro: MacroSettings = Field(default_factory=MacroSettings)
+    opportunity: OpportunitySettings = Field(default_factory=OpportunitySettings)
+    orb: ORBSettings = Field(default_factory=ORBSettings)
     display: DisplaySettings = Field(default_factory=DisplaySettings)
 
 

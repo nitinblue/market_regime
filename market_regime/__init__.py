@@ -43,6 +43,15 @@ from market_regime.fundamentals.fetch import fetch_fundamentals
 from market_regime.models.macro import MacroCalendar, MacroEvent, MacroEventType
 from market_regime.macro.calendar import get_macro_calendar
 
+# Opportunity assessment
+from market_regime.models.opportunity import (
+    LEAPOpportunity,
+    Verdict,
+    ZeroDTEOpportunity,
+)
+from market_regime.opportunity.zero_dte import assess_zero_dte
+from market_regime.opportunity.leap import assess_leap
+
 # Features
 from market_regime.features.pipeline import compute_features
 from market_regime.features.technicals import compute_technicals
@@ -96,6 +105,12 @@ __all__ = [
     "MacroEvent",
     "MacroEventType",
     "get_macro_calendar",
+    # Opportunity models
+    "Verdict",
+    "ZeroDTEOpportunity",
+    "LEAPOpportunity",
+    "assess_zero_dte",
+    "assess_leap",
     # Functions
     "compute_features",
     "compute_technicals",

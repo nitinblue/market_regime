@@ -4,7 +4,7 @@ from datetime import date, datetime
 
 import pytest
 
-from market_regime.models.fundamentals import (
+from market_analyzer.models.fundamentals import (
     BusinessInfo,
     CashMetrics,
     DebtMetrics,
@@ -18,13 +18,13 @@ from market_regime.models.fundamentals import (
     UpcomingEvents,
     ValuationMetrics,
 )
-from market_regime.models.macro import (
+from market_analyzer.models.macro import (
     MacroCalendar,
     MacroEvent,
     MacroEventImpact,
     MacroEventType,
 )
-from market_regime.models.opportunity import (
+from market_analyzer.models.opportunity import (
     FundamentalScore,
     LEAPOpportunity,
     LEAPStrategy,
@@ -32,14 +32,14 @@ from market_regime.models.opportunity import (
     ZeroDTEOpportunity,
     ZeroDTEStrategy,
 )
-from market_regime.models.phase import (
+from market_analyzer.models.phase import (
     PhaseEvidence,
     PhaseID,
     PhaseResult,
     PriceStructure,
 )
-from market_regime.models.regime import RegimeID, RegimeResult, TrendDirection
-from market_regime.models.technicals import (
+from market_analyzer.models.regime import RegimeID, RegimeResult, TrendDirection
+from market_analyzer.models.technicals import (
     BollingerBands,
     MACDData,
     MovingAverages,
@@ -52,8 +52,8 @@ from market_regime.models.technicals import (
     MarketPhase,
     PhaseIndicator,
 )
-from market_regime.opportunity.zero_dte import assess_zero_dte
-from market_regime.opportunity.leap import assess_leap
+from market_analyzer.opportunity.zero_dte import assess_zero_dte
+from market_analyzer.opportunity.leap import assess_leap
 
 
 # --- Test helpers ---
@@ -697,7 +697,7 @@ class TestSerialization:
 
 class TestConfig:
     def test_opportunity_settings_load(self):
-        from market_regime.config import get_settings, reset_settings
+        from market_analyzer.config import get_settings, reset_settings
 
         reset_settings()
         settings = get_settings()
@@ -706,7 +706,7 @@ class TestConfig:
         assert settings.opportunity.leap.earnings_blackout_days == 5
 
     def test_zero_dte_thresholds_configurable(self):
-        from market_regime.config import get_settings
+        from market_analyzer.config import get_settings
 
         cfg = get_settings().opportunity.zero_dte
         assert cfg.min_atr_pct == 0.3
@@ -714,7 +714,7 @@ class TestConfig:
         assert cfg.go_threshold == 0.55
 
     def test_leap_thresholds_configurable(self):
-        from market_regime.config import get_settings
+        from market_analyzer.config import get_settings
 
         cfg = get_settings().opportunity.leap
         assert cfg.go_threshold == 0.50

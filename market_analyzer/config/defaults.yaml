@@ -1,0 +1,211 @@
+features:
+  log_return_windows: [1, 5]
+  realized_vol_window: 20
+  atr_window: 14
+  trend_window: 20
+  volume_window: 20
+  annualization_factor: 252
+
+regime:
+  n_states: 4
+  training_lookback_years: 2.0
+  feature_lookback_days: 60
+  refit_frequency_days: 30
+
+hmm:
+  covariance_type: "full"
+  n_iter: 100
+  random_state: 42
+
+cache:
+  staleness_hours: 18.0
+  cache_dir: null
+  model_dir: null
+
+interpretation:
+  zscore_thresholds:
+    normal: 0.5
+    mild: 1.0
+    elevated: 2.0
+  stability_thresholds:
+    very_sticky: 0.95
+    sticky: 0.90
+    moderately_stable: 0.80
+  trend_strength_boundary: 0.3
+  rare_regime_pct: 10.0
+  recent_history_days: 20
+
+regimes:
+  names:
+    1: "Low-Vol Mean Reverting"
+    2: "High-Vol Mean Reverting"
+    3: "Low-Vol Trending"
+    4: "High-Vol Trending"
+  strategies:
+    1: "Primary: theta (IC, strangles). Avoid directional."
+    2: "Selective: theta (wider wings). Avoid directional."
+    3: "Primary: directional spreads. Light theta."
+    4: "Selective: directional (risk-defined). Long vega."
+  colors:
+    1: "#4CAF50"
+    2: "#FF9800"
+    3: "#2196F3"
+    4: "#F44336"
+  labels:
+    1: "R1: Low-Vol MR"
+    2: "R2: High-Vol MR"
+    3: "R3: Low-Vol Trend"
+    4: "R4: High-Vol Trend"
+
+phases:
+  swing_lookback: 5
+  swing_threshold_pct: 1.5
+  min_phase_days: 10
+  volume_trend_window: 20
+  volume_decline_threshold: 0.8
+  range_analysis_window: 30
+  sma_period: 50
+  min_regime_run_days: 5
+  names:
+    1: "Accumulation"
+    2: "Markup"
+    3: "Distribution"
+    4: "Markdown"
+  colors:
+    1: "#8BC34A"
+    2: "#4CAF50"
+    3: "#FF5722"
+    4: "#D32F2F"
+  strategies:
+    1: "LEAP entry zone: buy calls on dips to support. Low IV = cheap options."
+    2: "LEAP hold zone: ride existing LEAPs. Trail stops. Add on pullbacks."
+    3: "LEAP exit zone: take profits, tighten stops. Rotate to protective puts."
+    4: "LEAP avoid zone: close bullish LEAPs. Consider bear put LEAPs if R4."
+
+fundamentals:
+  cache_ttl_minutes: 60
+
+macro:
+  lookahead_days: 60
+
+technicals:
+  sma_windows: [20, 50, 200]
+  ema_windows: [9, 21]
+  rsi_period: 14
+  rsi_overbought: 70.0
+  rsi_oversold: 30.0
+  bollinger_window: 20
+  bollinger_std: 2.0
+  macd_fast: 12
+  macd_slow: 26
+  macd_signal: 9
+  vwma_window: 20
+  atr_period: 14
+  stochastic_k: 14
+  stochastic_d: 3
+  stochastic_overbought: 80.0
+  stochastic_oversold: 20.0
+  vcp_lookback_days: 120
+  vcp_min_contractions: 2
+  vcp_min_contraction_pct: 3.0
+  vcp_tightening_ratio: 0.7
+  vcp_ready_range_pct: 5.0
+  vcp_pivot_proximity_pct: 3.0
+  ob_lookback_days: 60
+  ob_impulse_atr_multiple: 2.0
+  ob_min_volume_factor: 1.3
+  ob_max_blocks: 5
+  fvg_lookback_days: 60
+  fvg_min_gap_pct: 0.3
+  fvg_max_gaps: 5
+
+opportunity:
+  zero_dte:
+    earnings_blackout_days: 1
+    min_atr_pct: 0.3
+    max_atr_pct: 3.0
+    r4_confidence_threshold: 0.7
+    go_threshold: 0.55
+    caution_threshold: 0.35
+    atr_sweet_low: 0.5
+    atr_sweet_high: 1.5
+    regime_multipliers:
+      1: 1.0
+      2: 0.85
+      3: 0.6
+      4: 0.3
+  leap:
+    earnings_blackout_days: 5
+    r4_confidence_threshold: 0.7
+    distribution_confidence_threshold: 0.65
+    markdown_confidence_threshold: 0.65
+    min_fundamental_score: 0.2
+    go_threshold: 0.50
+    caution_threshold: 0.30
+    earnings_growth_strong: 0.15
+    earnings_growth_moderate: 0.05
+    revenue_growth_strong: 0.15
+    revenue_growth_moderate: 0.05
+    margin_strong: 0.20
+    margin_moderate: 0.10
+    debt_low: 50.0
+    debt_moderate: 100.0
+    debt_high: 200.0
+    pe_cheap: 15.0
+    pe_fair: 25.0
+    pe_expensive: 40.0
+    bull_entry_52wk_pct: 40.0
+  breakout:
+    r4_confidence_threshold: 0.70
+    r2_confidence_threshold: 0.80
+    earnings_blackout_days: 2
+    min_base_days: 10
+    go_threshold: 0.55
+    caution_threshold: 0.35
+    vcp_ready_min_score: 0.6
+    vcp_breakout_confirmation: 0.8
+    bollinger_squeeze_bandwidth: 0.04
+    range_compression_threshold: 0.3
+    volume_declining_threshold: 0.8
+    resistance_proximity_pct: 2.0
+    atr_low_baseline_pct: 0.5
+    regime_multipliers:
+      1: 0.85
+      2: 0.6
+      3: 1.0
+      4: 0.3
+  momentum:
+    r1_confidence_threshold: 0.70
+    earnings_blackout_days: 3
+    rsi_extreme_overbought: 85.0
+    rsi_extreme_oversold: 15.0
+    go_threshold: 0.55
+    caution_threshold: 0.35
+    rsi_healthy_bull_low: 50.0
+    rsi_healthy_bull_high: 70.0
+    rsi_healthy_bear_low: 30.0
+    rsi_healthy_bear_high: 50.0
+    volume_confirmation_factor: 1.2
+    pullback_to_ma_pct: 1.5
+    regime_multipliers:
+      1: 0.3
+      2: 0.6
+      3: 1.0
+      4: 0.75
+
+orb:
+  opening_minutes: 30
+  extensions: [1.0, 1.5, 2.0]
+  market_open_hour: 9
+  market_open_minute: 30
+
+display:
+  default_tickers: ["SPY", "GLD", "QQQ", "TLT"]
+  confidence_cap: 99.9
+  plot:
+    figure_size: [14, 10]
+    height_ratios: [5, 1.5, 1.5, 1]
+    font_size: 8
+    legend_alpha: 0.9
+    xaxis_rotation: 30
+    month_interval: 2

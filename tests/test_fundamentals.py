@@ -9,14 +9,14 @@ from unittest.mock import MagicMock, patch
 import pandas as pd
 import pytest
 
-from market_regime.fundamentals.fetch import (
+from market_analyzer.fundamentals.fetch import (
     _safe_get,
     _build_52week,
     fetch_fundamentals,
     invalidate_fundamentals_cache,
     _cache,
 )
-from market_regime.models.fundamentals import FundamentalsSnapshot
+from market_analyzer.models.fundamentals import FundamentalsSnapshot
 
 
 class TestSafeGet:
@@ -138,7 +138,7 @@ class TestFetchFundamentals:
         """Clear cache before each test."""
         _cache.clear()
 
-    @patch("market_regime.fundamentals.fetch.yf.Ticker")
+    @patch("market_analyzer.fundamentals.fetch.yf.Ticker")
     def test_returns_snapshot(self, mock_ticker_cls):
         mock_ticker_cls.return_value = _mock_ticker()
         result = fetch_fundamentals("AAPL", ttl_minutes=60)
@@ -149,7 +149,7 @@ class TestFetchFundamentals:
         assert result.valuation.trailing_pe == 25.0
         assert result.earnings.trailing_eps == 6.0
 
-    @patch("market_regime.fundamentals.fetch.yf.Ticker")
+    @patch("market_analyzer.fundamentals.fetch.yf.Ticker")
     def test_cache_hit(self, mock_ticker_cls):
         mock_ticker_cls.return_value = _mock_ticker()
 
@@ -161,7 +161,7 @@ class TestFetchFundamentals:
         # yf.Ticker should only be called once
         assert mock_ticker_cls.call_count == 1
 
-    @patch("market_regime.fundamentals.fetch.yf.Ticker")
+    @patch("market_analyzer.fundamentals.fetch.yf.Ticker")
     def test_cache_invalidation(self, mock_ticker_cls):
         mock_ticker_cls.return_value = _mock_ticker()
 
@@ -171,7 +171,7 @@ class TestFetchFundamentals:
 
         assert mock_ticker_cls.call_count == 2
 
-    @patch("market_regime.fundamentals.fetch.yf.Ticker")
+    @patch("market_analyzer.fundamentals.fetch.yf.Ticker")
     def test_invalidate_all(self, mock_ticker_cls):
         mock_ticker_cls.return_value = _mock_ticker()
 
@@ -182,7 +182,7 @@ class TestFetchFundamentals:
 
         assert mock_ticker_cls.call_count == 3
 
-    @patch("market_regime.fundamentals.fetch.yf.Ticker")
+    @patch("market_analyzer.fundamentals.fetch.yf.Ticker")
     def test_52week_calculations(self, mock_ticker_cls):
         mock_ticker_cls.return_value = _mock_ticker()
         result = fetch_fundamentals("AAPL", ttl_minutes=60)
@@ -194,7 +194,7 @@ class TestFetchFundamentals:
         assert result.fifty_two_week.pct_from_low is not None
         assert result.fifty_two_week.pct_from_low > 0  # above 52w low
 
-    @patch("market_regime.fundamentals.fetch.yf.Ticker")
+    @patch("market_analyzer.fundamentals.fetch.yf.Ticker")
     def test_handles_missing_fields(self, mock_ticker_cls):
         """Sparse info dict should still produce a valid snapshot."""
         sparse_info = {"regularMarketPrice": 100.0}
@@ -206,26 +206,26 @@ class TestFetchFundamentals:
         assert result.business.long_name is None
         assert result.fifty_two_week.high is None
 
-    @patch("market_regime.fundamentals.fetch.yf.Ticker")
+    @patch("market_analyzer.fundamentals.fetch.yf.Ticker")
     def test_invalid_ticker_raises(self, mock_ticker_cls):
         mock_ticker_cls.return_value = _mock_ticker({"regularMarketPrice": None})
         with pytest.raises(ValueError, match="No data"):
             fetch_fundamentals("INVALID", ttl_minutes=60)
 
-    @patch("market_regime.fundamentals.fetch.yf.Ticker")
+    @patch("market_analyzer.fundamentals.fetch.yf.Ticker")
     def test_case_normalization(self, mock_ticker_cls):
         mock_ticker_cls.return_value = _mock_ticker()
         result = fetch_fundamentals("aapl", ttl_minutes=60)
         assert result.ticker == "AAPL"
 
-    @patch("market_regime.fundamentals.fetch.yf.Ticker")
+    @patch("market_analyzer.fundamentals.fetch.yf.Ticker")
     def test_recent_earnings_parsed(self, mock_ticker_cls):
         mock_ticker_cls.return_value = _mock_ticker()
         result = fetch_fundamentals("AAPL", ttl_minutes=60)
         assert len(result.recent_earnings) == 2
         assert result.recent_earnings[0].eps_actual == 1.55
 
-    @patch("market_regime.fundamentals.fetch.yf.Ticker")
+    @patch("market_analyzer.fundamentals.fetch.yf.Ticker")
     def test_upcoming_events_parsed(self, mock_ticker_cls):
         mock_ticker_cls.return_value = _mock_ticker()
         result = fetch_fundamentals("AAPL", ttl_minutes=60)

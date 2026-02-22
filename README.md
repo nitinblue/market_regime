@@ -1,1 +1,1 @@
-# market_regime
+# market_analyzer

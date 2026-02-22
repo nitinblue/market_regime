@@ -1,13 +1,13 @@
-"""Shared test fixtures for market_regime tests."""
+"""Shared test fixtures for market_analyzer tests."""
 
 import numpy as np
 import pandas as pd
 import pytest
 
-from market_regime.features.pipeline import compute_features
-from market_regime.hmm.trainer import HMMTrainer
-from market_regime.models.features import FeatureConfig
-from market_regime.models.regime import RegimeConfig
+from market_analyzer.features.pipeline import compute_features
+from market_analyzer.hmm.trainer import HMMTrainer
+from market_analyzer.models.features import FeatureConfig
+from market_analyzer.models.regime import RegimeConfig
 
 
 def _make_ohlcv(

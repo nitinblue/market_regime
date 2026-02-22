@@ -1,6 +1,6 @@
-# market_regime — Integration Guide
+# market_analyzer — Integration Guide
 
-API reference for external programs (cotrader, decision agent, etc.) consuming `market_regime` as a library.
+API reference for external programs (cotrader, decision agent, etc.) consuming `market_analyzer` as a library.
 
 ---
 
@@ -8,10 +8,10 @@ API reference for external programs (cotrader, decision agent, etc.) consuming `
 
 ```bash
 # From local checkout (editable)
-pip install -e /path/to/market_regime
+pip install -e /path/to/market_analyzer
 
 # Or with plot extras
-pip install -e "/path/to/market_regime[plot]"
+pip install -e "/path/to/market_analyzer[plot]"
 
 # Requires Python 3.11+. Use 3.12 for best compatibility (hmmlearn lacks 3.14 wheels).
 ```
@@ -23,13 +23,28 @@ All dependencies (pandas, hmmlearn, yfinance, pyarrow, pydantic, etc.) install a
 ## Quick Start
 
 ```python
-from market_regime import RegimeService, DataService
+from market_analyzer import MarketAnalyzer, DataService
 
-# DataService handles OHLCV fetching + parquet caching (~/.market_regime/cache/)
+# MarketAnalyzer composes all services behind a single facade
+ma = MarketAnalyzer(data_service=DataService())
+
+# Access any capability via sub-services
+regime = ma.regime.detect("SPY")
+tech   = ma.technicals.snapshot("SPY")
+phase  = ma.phase.detect("SPY")
+fund   = ma.fundamentals.get("SPY")
+macro  = ma.macro.calendar()
+bo     = ma.opportunity.assess_breakout("SPY")
+```
+
+Each service is also usable independently:
+
+```python
+from market_analyzer import RegimeService, DataService
+
 data_svc = DataService()
-
-# RegimeService orchestrates HMM training, inference, and research
 regime_svc = RegimeService(data_service=data_svc)
+result = regime_svc.detect("SPY")
 ```
 
 ---
@@ -108,11 +123,11 @@ for c in report.comparison:
 Use when you just need OHLCV data (cache-first, auto delta-fetch).
 
 ```python
-from market_regime import DataService
+from market_analyzer import DataService
 
 data_svc = DataService()
 
-# Fetch OHLCV (cached to ~/.market_regime/cache/ohlcv/SPY.parquet)
+# Fetch OHLCV (cached to ~/.market_analyzer/cache/ohlcv/SPY.parquet)
 df = data_svc.get_ohlcv("SPY")
 # Returns DataFrame: index=DatetimeIndex, columns=[Open, High, Low, Close, Volume]
 
@@ -239,9 +254,17 @@ r2 = TickerResearch.model_validate(d)
 Everything is exported from the top-level package:
 
 ```python
-from market_regime import (
-    # Services
+from market_analyzer import (
+    # Facade
+    MarketAnalyzer,
+
+    # Individual services
     RegimeService,
+    TechnicalService,
+    PhaseService,
+    FundamentalService,
+    MacroService,
+    OpportunityService,
     DataService,
 
     # Regime detection
@@ -281,14 +304,13 @@ from market_regime import (
 ## Typical cotrader Integration
 
 ```python
-from market_regime import RegimeService, DataService, RegimeID
+from market_analyzer import MarketAnalyzer, DataService, RegimeID
 
 # Initialize once at startup
-data_svc = DataService()
-regime_svc = RegimeService(data_service=data_svc)
+ma = MarketAnalyzer(data_service=DataService())
 
 # In strategy selection loop:
-result = regime_svc.detect("SPY")
+result = ma.regime.detect("SPY")
 
 if result.regime == RegimeID.R1_LOW_VOL_MR:
     # theta strategies: iron condors, strangles
@@ -297,8 +319,12 @@ elif result.regime == RegimeID.R3_LOW_VOL_TREND:
     # directional spreads
     ...
 
+# Opportunity assessment:
+bo = ma.opportunity.assess_breakout("SPY")
+mo = ma.opportunity.assess_momentum("SPY")
+
 # For research UI section:
-report = regime_svc.research_batch(tickers=watchlist)
+report = ma.regime.research_batch(tickers=watchlist)
 # Render report.tickers[i].transition_matrix, .current_features, etc.
 ```
 
@@ -306,9 +332,9 @@ report = regime_svc.research_batch(tickers=watchlist)
 
 ## Caching Behavior
 
-- Cache location: `~/.market_regime/cache/`
+- Cache location: `~/.market_analyzer/cache/`
 - Staleness: 18 hours (weekday-aware — won't refetch on weekends)
 - Delta-fetch: only downloads missing date range, appends to existing parquet
 - First call for a ticker: full download + HMM training (~2 years of data)
 - Subsequent calls: cache hit, instant return
-- Models cached at: `~/.market_regime/models/{TICKER}.joblib`
+- Models cached at: `~/.market_analyzer/models/{TICKER}.joblib`

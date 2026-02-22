@@ -7,8 +7,8 @@ from unittest.mock import patch
 import pandas as pd
 import pytest
 
-from market_regime.data.cache.parquet_cache import ParquetCache
-from market_regime.models.data import CacheMeta, DataType, ProviderType
+from market_analyzer.data.cache.parquet_cache import ParquetCache
+from market_analyzer.models.data import CacheMeta, DataType, ProviderType
 
 
 @pytest.fixture
@@ -102,7 +102,7 @@ class TestStaleness:
         meta.last_fetched = datetime(2025, 1, 3, 16, 0, 0)  # Friday 4pm
         cache.write("SPY", DataType.OHLCV, sample_df, meta)
 
-        with patch("market_regime.data.cache.parquet_cache.date") as mock_date:
+        with patch("market_analyzer.data.cache.parquet_cache.date") as mock_date:
             mock_date.today.return_value = saturday
             mock_date.side_effect = lambda *a, **kw: date(*a, **kw)
             assert cache.is_stale("SPY", DataType.OHLCV) is False
@@ -116,7 +116,7 @@ class TestStaleness:
         meta.last_fetched = datetime(2025, 1, 3, 16, 0, 0)
         cache.write("SPY", DataType.OHLCV, sample_df, meta)
 
-        with patch("market_regime.data.cache.parquet_cache.date") as mock_date:
+        with patch("market_analyzer.data.cache.parquet_cache.date") as mock_date:
             mock_date.today.return_value = sunday
             mock_date.side_effect = lambda *a, **kw: date(*a, **kw)
             assert cache.is_stale("SPY", DataType.OHLCV) is False

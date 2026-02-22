@@ -6,9 +6,9 @@ from unittest.mock import MagicMock, patch
 import pandas as pd
 import pytest
 
-from market_regime.data.exceptions import DataFetchError
-from market_regime.data.providers.yfinance import YFinanceProvider
-from market_regime.models.data import DataRequest, DataType, ProviderType
+from market_analyzer.data.exceptions import DataFetchError
+from market_analyzer.data.providers.yfinance import YFinanceProvider
+from market_analyzer.models.data import DataRequest, DataType, ProviderType
 
 
 @pytest.fixture
@@ -41,7 +41,7 @@ class TestYFinanceFetch:
             end_date=date(2025, 1, 8),
         )
 
-        with patch("market_regime.data.providers.yfinance.yf.download", return_value=sample_yf_df):
+        with patch("market_analyzer.data.providers.yfinance.yf.download", return_value=sample_yf_df):
             result = provider.fetch(request)
 
         assert list(result.columns) == ["Open", "High", "Low", "Close", "Volume"]
@@ -52,14 +52,14 @@ class TestYFinanceFetch:
     def test_fetch_empty_raises(self, provider: YFinanceProvider) -> None:
         request = DataRequest(ticker="INVALID", data_type=DataType.OHLCV)
 
-        with patch("market_regime.data.providers.yfinance.yf.download", return_value=pd.DataFrame()):
+        with patch("market_analyzer.data.providers.yfinance.yf.download", return_value=pd.DataFrame()):
             with pytest.raises(DataFetchError, match="No data returned"):
                 provider.fetch(request)
 
     def test_fetch_exception_raises(self, provider: YFinanceProvider) -> None:
         request = DataRequest(ticker="SPY", data_type=DataType.OHLCV)
 
-        with patch("market_regime.data.providers.yfinance.yf.download", side_effect=Exception("network error")):
+        with patch("market_analyzer.data.providers.yfinance.yf.download", side_effect=Exception("network error")):
             with pytest.raises(DataFetchError, match="network error"):
                 provider.fetch(request)
 
@@ -81,7 +81,7 @@ class TestYFinanceFetch:
         )
 
         request = DataRequest(ticker="SPY", data_type=DataType.OHLCV)
-        with patch("market_regime.data.providers.yfinance.yf.download", return_value=df):
+        with patch("market_analyzer.data.providers.yfinance.yf.download", return_value=df):
             result = provider.fetch(request)
 
         assert list(result.columns) == ["Open", "High", "Low", "Close", "Volume"]
@@ -92,18 +92,18 @@ class TestYFinanceValidate:
         mock_ticker = MagicMock()
         mock_ticker.info = {"regularMarketPrice": 450.0}
 
-        with patch("market_regime.data.providers.yfinance.yf.Ticker", return_value=mock_ticker):
+        with patch("market_analyzer.data.providers.yfinance.yf.Ticker", return_value=mock_ticker):
             assert provider.validate_ticker("SPY") is True
 
     def test_invalid_ticker(self, provider: YFinanceProvider) -> None:
         mock_ticker = MagicMock()
         mock_ticker.info = {"regularMarketPrice": None}
 
-        with patch("market_regime.data.providers.yfinance.yf.Ticker", return_value=mock_ticker):
+        with patch("market_analyzer.data.providers.yfinance.yf.Ticker", return_value=mock_ticker):
             assert provider.validate_ticker("ZZZZZZZ") is False
 
     def test_exception_returns_false(self, provider: YFinanceProvider) -> None:
-        with patch("market_regime.data.providers.yfinance.yf.Ticker", side_effect=Exception("fail")):
+        with patch("market_analyzer.data.providers.yfinance.yf.Ticker", side_effect=Exception("fail")):
             assert provider.validate_ticker("SPY") is False
 
 

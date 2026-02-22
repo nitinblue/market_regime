@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from market_regime.features.pipeline import (
+from market_analyzer.features.pipeline import (
     _compute_raw_features,
     _normalize_features,
     _validate_ohlcv,
@@ -12,7 +12,7 @@ from market_regime.features.pipeline import (
     compute_features_with_inspection,
     FEATURE_NAMES,
 )
-from market_regime.models.features import FeatureConfig, FeatureInspection
+from market_analyzer.models.features import FeatureConfig, FeatureInspection
 
 
 class TestValidation:

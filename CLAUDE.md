@@ -1,8 +1,8 @@
-# market_regime
+# market_analyzer
 
 **Historical market data service and HMM-based regime detection for options trading.**
 
-Serves as the canonical historical data layer for the entire ecosystem (market_regime, cotrader, decision agent). Detects per-instrument regime state (R1–R4) using Hidden Markov Models, enabling regime-aware strategy selection for small options accounts. Real-time/streaming data remains with broker connections in cotrader.
+Serves as the canonical historical data layer for the entire ecosystem (market_analyzer, cotrader, decision agent). Detects per-instrument regime state (R1–R4) using Hidden Markov Models, enabling regime-aware strategy selection for small options accounts. Real-time/streaming data remains with broker connections in cotrader.
 
 ---
 
@@ -34,7 +34,7 @@ Serves as the canonical historical data layer for the entire ecosystem (market_r
 - **Keep it a library.** This package is imported by cotrader—no CLI, no server, no UI.
 - **Prefer simplicity.** Minimal dependencies, no over-engineering, no speculative abstractions.
 - **Type everything.** Use Pydantic models for all public interfaces. Type hints on all functions.
-- **Historical data flows through this module.** All projects in the ecosystem (cotrader, decision agent) use `market_regime.data.DataService` for historical data. No other module fetches its own historical data.
+- **Historical data flows through this module.** All projects in the ecosystem (cotrader, decision agent) use `market_analyzer.data.DataService` for historical data. No other module fetches its own historical data.
 - **Cache before fetch.** Always check parquet cache first. Only hit network for delta-fetch (missing date ranges). Never re-download data that's already cached.
 - **Provider failures are not silent.** Raise typed exceptions on fetch failures, rate limits, bad tickers. Callers must be able to distinguish "no data exists" from "fetch failed."
 - **No API keys in code.** All credentials come from environment variables or config files. Never hardcode keys, tokens, or passwords.
@@ -105,7 +105,7 @@ Directional trades only when:
 ## Architecture & Module Structure (Owner: Claude)
 
 ```
-market_regime/
+market_analyzer/
 ├── __init__.py
 ├── models/
 │   ├── __init__.py
@@ -446,11 +446,11 @@ This gives a 2x2 mapping that naturally produces R1–R4.
 
 ### Cache Strategy
 
-**Location:** `~/.market_regime/cache/`
+**Location:** `~/.market_analyzer/cache/`
 
 **Directory layout:**
 ```
-~/.market_regime/cache/
+~/.market_analyzer/cache/
 ├── ohlcv/
 │   ├── GLD.parquet
 │   ├── SPY.parquet
@@ -496,8 +496,8 @@ All credentials via environment variables:
 
 **Pattern 1: Auto-fetch via RegimeService**
 ```python
-from market_regime.data.service import DataService
-from market_regime.service.regime_service import RegimeService
+from market_analyzer.data.service import DataService
+from market_analyzer.service.regime_service import RegimeService
 
 data_svc = DataService()
 regime_svc = RegimeService(data_service=data_svc)
@@ -508,7 +508,7 @@ result = regime_svc.detect(ticker="GLD")
 
 **Pattern 2: Direct DataService use by cotrader**
 ```python
-from market_regime.data.service import DataService
+from market_analyzer.data.service import DataService
 
 data_svc = DataService()
 
@@ -519,7 +519,7 @@ iv_data = data_svc.get_options_iv("SPY")
 
 **Pattern 3: Caller provides data (backward compatible)**
 ```python
-from market_regime.service.regime_service import RegimeService
+from market_analyzer.service.regime_service import RegimeService
 
 regime_svc = RegimeService()  # No data_service
 result = regime_svc.detect(ticker="GLD", ohlcv=my_dataframe)
@@ -581,16 +581,16 @@ This library is used by `cotrader` (trading platform at `C:\Users\nitin\PythonPr
 ### Data Integration Contract
 
 ```
-cotrader → market_regime.data.DataService.get_ohlcv() → cached OHLCV DataFrame
-cotrader → market_regime.data.DataService.get_options_iv() → cached IV DataFrame
+cotrader → market_analyzer.data.DataService.get_ohlcv() → cached OHLCV DataFrame
+cotrader → market_analyzer.data.DataService.get_options_iv() → cached IV DataFrame
 ```
 
-All historical data requests from cotrader flow through `market_regime.data.DataService`. Cotrader does not fetch its own historical data.
+All historical data requests from cotrader flow through `market_analyzer.data.DataService`. Cotrader does not fetch its own historical data.
 
 ### Regime Integration Contract
 
 ```
-cotrader → market_regime.RegimeService.detect() → RegimeResult
+cotrader → market_analyzer.RegimeService.detect() → RegimeResult
 cotrader uses RegimeResult to gate strategy selection in Decision Agent
 ```
 
@@ -601,10 +601,10 @@ cotrader (execution, broker, real-time data)
     │
     ├── real-time quotes, fills, order book → broker connections (cotrader-owned)
     │
-    ├── historical OHLCV, IV, trade history → market_regime.data.DataService
+    ├── historical OHLCV, IV, trade history → market_analyzer.data.DataService
     │
     ▼
-market_regime (this library) ← historical data + regime detection
+market_analyzer (this library) ← historical data + regime detection
     │
     ▼
 Decision Agent (separate library) ← strategy selection
@@ -613,13 +613,13 @@ Decision Agent (separate library) ← strategy selection
 What-if Evaluator (part of cotrader) ← PnL, Greeks, Margin
 ```
 
-**Boundary:** real-time data = cotrader, historical data = market_regime.
+**Boundary:** real-time data = cotrader, historical data = market_analyzer.
 
 ---
 
 ## Quick Reference — Command Lines
 
-All commands assume you're in the project root (`C:\Users\nitin\PythonProjects\market_regime`).
+All commands assume you're in the project root (`C:\Users\nitin\PythonProjects\market_analyzer`).
 
 ### Setup
 
@@ -687,8 +687,8 @@ py -3.12 -m venv .venv
 ```bash
 # Detect regime for a single ticker (auto-fetches OHLCV, caches to parquet)
 .venv/Scripts/python -c "
-from market_regime.data.service import DataService
-from market_regime.service.regime_service import RegimeService
+from market_analyzer.data.service import DataService
+from market_analyzer.service.regime_service import RegimeService
 svc = RegimeService(data_service=DataService())
 r = svc.detect('SPY')
 print(f'{r.ticker}: R{r.regime} ({r.confidence:.0%})')
@@ -696,22 +696,22 @@ print(f'{r.ticker}: R{r.regime} ({r.confidence:.0%})')
 
 # Fetch OHLCV data only (cache-first)
 .venv/Scripts/python -c "
-from market_regime.data.service import DataService
+from market_analyzer.data.service import DataService
 df = DataService().get_ohlcv('GLD')
 print(df.tail())
 "
 
 # Check what's cached
 .venv/Scripts/python -c "
-from market_regime.data.service import DataService
+from market_analyzer.data.service import DataService
 for m in DataService().cache_status('SPY'):
     print(f'{m.data_type}: {m.first_date} → {m.last_date} ({m.row_count} rows)')
 "
 
 # Batch regime detection
 .venv/Scripts/python -c "
-from market_regime.data.service import DataService
-from market_regime.service.regime_service import RegimeService
+from market_analyzer.data.service import DataService
+from market_analyzer.service.regime_service import RegimeService
 svc = RegimeService(data_service=DataService())
 for t, r in svc.detect_batch(tickers=['SPY','GLD','QQQ','TLT']).items():
     print(f'{t}: R{r.regime} ({r.confidence:.0%})')
@@ -722,18 +722,18 @@ for t, r in svc.detect_batch(tickers=['SPY','GLD','QQQ','TLT']).items():
 
 ```bash
 # Cache location
-ls ~/.market_regime/cache/ohlcv/
+ls ~/.market_analyzer/cache/ohlcv/
 
 # Invalidate cache for a ticker (forces re-fetch on next request)
 .venv/Scripts/python -c "
-from market_regime.data.service import DataService
+from market_analyzer.data.service import DataService
 DataService().invalidate_cache('SPY')
 print('Cache invalidated for SPY')
 "
 
 # Invalidate all cached data for a ticker
 .venv/Scripts/python -c "
-from market_regime.data.service import DataService
+from market_analyzer.data.service import DataService
 DataService().invalidate_cache('SPY', data_type=None)
 "
 ```
@@ -748,4 +748,4 @@ DataService().invalidate_cache('SPY', data_type=None)
 | 2026-02-21 | Package structure defined | models/, features/, hmm/, service/, data/ modules |
 | 2026-02-21 | yfinance as optional dependency | Core library must work with caller-provided DataFrames |
 | 2026-02-21 | Label alignment via vol+trend axes | 2x2 sorting maps arbitrary HMM states to R1–R4 semantically |
-| 2026-02-21 | Expanded to canonical historical data service | market_regime owns all historical data for ecosystem; added DataService, parquet cache, three providers (yfinance, CBOE, TastyTrade); yfinance now required |
+| 2026-02-21 | Expanded to canonical historical data service | market_analyzer owns all historical data for ecosystem; added DataService, parquet cache, three providers (yfinance, CBOE, TastyTrade); yfinance now required |

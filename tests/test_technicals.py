@@ -4,8 +4,8 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from market_regime.config import TechnicalsSettings
-from market_regime.features.technicals import (
+from market_analyzer.config import TechnicalsSettings
+from market_analyzer.features.technicals import (
     compute_atr,
     compute_bollinger,
     compute_ema,
@@ -19,12 +19,12 @@ from market_regime.features.technicals import (
     _detect_golden_death_cross,
     _detect_macd_crossover,
 )
-from market_regime.features.technicals import (
+from market_analyzer.features.technicals import (
     compute_fair_value_gaps,
     compute_order_blocks,
     compute_smart_money,
 )
-from market_regime.models.technicals import (
+from market_analyzer.models.technicals import (
     FVGType,
     MarketPhase,
     OrderBlockType,

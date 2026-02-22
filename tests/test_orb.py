@@ -4,8 +4,8 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from market_regime.features.orb import compute_orb
-from market_regime.models.technicals import ORBData, ORBLevel, ORBStatus, SignalDirection
+from market_analyzer.features.orb import compute_orb
+from market_analyzer.models.technicals import ORBData, ORBLevel, ORBStatus, SignalDirection
 
 
 def _make_intraday(

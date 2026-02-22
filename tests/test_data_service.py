@@ -6,12 +6,12 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from market_regime.data.cache.parquet_cache import ParquetCache
-from market_regime.data.exceptions import NoProviderError
-from market_regime.data.providers.base import DataProvider
-from market_regime.data.registry import ProviderRegistry
-from market_regime.data.service import DataService
-from market_regime.models.data import (
+from market_analyzer.data.cache.parquet_cache import ParquetCache
+from market_analyzer.data.exceptions import NoProviderError
+from market_analyzer.data.providers.base import DataProvider
+from market_analyzer.data.registry import ProviderRegistry
+from market_analyzer.data.service import DataService
+from market_analyzer.models.data import (
     DataRequest,
     DataType,
     ProviderType,

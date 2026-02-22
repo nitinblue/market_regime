@@ -4,8 +4,8 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from market_regime.config import PhaseSettings
-from market_regime.phases.price_structure import (
+from market_analyzer.config import PhaseSettings
+from market_analyzer.phases.price_structure import (
     compute_price_structure,
     compute_range_compression,
     compute_volume_trend,

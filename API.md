@@ -55,6 +55,8 @@ print(f"Momentum: {mo.verdict} — {mo.momentum_strategy}")
 │  .fundamentals  → FundamentalService   Valuation, earnings       │
 │  .macro         → MacroService         FOMC, CPI, NFP, PCE       │
 │  .opportunity   → OpportunityService   0DTE, LEAP, BO, MOM       │
+│  .black_swan    → BlackSwanService     Tail-risk circuit breaker   │
+│  .ranking       → TradeRankingService  Multi-ticker trade ranking  │
 │  .data          → DataService          Cache-first OHLCV          │
 └──────────────────────────┬───────────────────────────────────────┘
                            │
@@ -885,6 +887,191 @@ for meta in ds.cache_status("SPY"):
 ds.invalidate_cache("SPY")
 ```
 
+### 14. Black Swan / Tail-Risk Alert — "Is it safe to trade today?"
+
+Daily circuit breaker that detects tail-risk conditions across 9 indicators. Pre-trade gate: if alert is CRITICAL, halt trading.
+
+```python
+ma = MarketAnalyzer(data_service=DataService())
+
+alert = ma.black_swan.alert()
+
+print(f"Alert: {alert.alert_level}")       # NORMAL | ELEVATED | HIGH | CRITICAL
+print(f"Stress: {alert.composite_score:.0%}")
+
+# Circuit breakers (any one → CRITICAL)
+for cb in alert.circuit_breakers:
+    if cb.triggered:
+        print(f"  BREAKER: {cb.name} — {cb.description}")
+
+# Individual indicators
+for ind in alert.indicators:
+    print(f"  {ind.name}: {ind.value} → {ind.status} (score={ind.score:.2f})")
+
+print(f"Action: {alert.action}")
+print(alert.summary)
+```
+
+**Indicators:** VIX level, VIX term structure, credit stress (HYG/LQD), SPY drawdown, realized vs implied vol, treasury stress (TLT), EM contagion (EEM/SPY), yield curve (FRED), put/call ratio (FRED).
+
+**Circuit breakers:** VIX > 40, VIX/VIX3M > 1.20, SPY 1-day < -4%, HYG/LQD 1-day drop > 3%.
+
+**Alert levels:**
+
+| Level | Composite Score | Action |
+|-------|----------------|--------|
+| NORMAL | < 0.25 | Business as usual |
+| ELEVATED | 0.25–0.50 | Reduce new positions, tighten stops |
+| HIGH | 0.50–0.75 | Flatten directional, scale into hedges |
+| CRITICAL | ≥ 0.75 or circuit breaker | Halt all new trades |
+
+**Returns:** `BlackSwanAlert` — `alert_level`, `composite_score`, `circuit_breakers`, `indicators`, `triggered_breakers`, `action`, `summary`.
+
+**Optional FRED data:** Install `pip install -e ".[fred]"` and set `FRED_API_KEY` env var for yield curve and put/call ratio indicators. Without it, those 2 indicators degrade gracefully and weights re-normalize.
+
+---
+
+### 15. Trade Ranking — "What's the best trade across all my tickers?"
+
+Runs all opportunity assessments across multiple tickers and strategies, scores each combination, and returns ranked results. Answers both "best strategy for ticker X" and "best ticker for strategy Y."
+
+```python
+ma = MarketAnalyzer(data_service=DataService())
+
+result = ma.ranking.rank(["SPY", "AAPL", "GLD", "MSFT"])
+
+# Overall top trades
+for entry in result.top_trades[:5]:
+    print(f"#{entry.rank} {entry.ticker} {entry.strategy_type} "
+          f"score={entry.composite_score:.2f} verdict={entry.verdict}")
+
+# Best strategy per ticker
+for ticker, entries in result.by_ticker.items():
+    best = entries[0]
+    print(f"{ticker}: {best.strategy_type} (score={best.composite_score:.2f})")
+
+# Best ticker per strategy
+for strat, entries in result.by_strategy.items():
+    best = entries[0]
+    print(f"{strat}: {best.ticker} (score={best.composite_score:.2f})")
+
+# Black swan gate
+print(f"Alert: {result.black_swan_level}, gate={result.black_swan_gate}")
+print(result.summary)
+```
+
+**How it works:**
+
+1. **Black swan gate** — if CRITICAL, halt all trading (empty ranking).
+
+2. **For each ticker x strategy**, run opportunity assessment (0DTE, LEAP, breakout, momentum).
+
+3. **Score each** with a weighted composite:
+
+| Component | Weight | Source |
+|-----------|--------|--------|
+| `verdict_score` | 0.25 | GO=1.0, CAUTION=0.5, NO_GO=0.0 |
+| `confidence_score` | 0.25 | Opportunity `.confidence` |
+| `regime_alignment` | 0.15 | Regime x Strategy matrix |
+| `risk_reward` | 0.15 | LevelsAnalysis R:R ratio |
+| `technical_quality` | 0.10 | RSI + MACD + MA alignment + Stochastic |
+| `phase_alignment` | 0.10 | Phase x Strategy matrix |
+
+4. **Adjustments:**
+   - Income-first bias: +0.05 boost for 0DTE in R1/R2 (theta harvesting)
+   - Macro penalty: -0.02 per event in next 7 days (max -0.10)
+   - Earnings penalty: -0.10 if earnings within 3 days
+   - Black swan: multiplicative penalty `score x (1 - black_swan_score)`
+
+5. **Sort** by composite score descending, assign ranks, group by ticker and strategy.
+
+**Regime x Strategy alignment:**
+
+| | R1 (Low-Vol MR) | R2 (High-Vol MR) | R3 (Low-Vol Trend) | R4 (High-Vol Trend) |
+|---|---|---|---|---|
+| zero_dte | 1.0 | 0.6 | 0.5 | 0.3 |
+| leap | 0.3 | 0.2 | 1.0 | 0.5 |
+| breakout | 0.4 | 0.3 | 0.8 | 1.0 |
+| momentum | 0.2 | 0.3 | 1.0 | 0.8 |
+
+**Phase x Strategy alignment:**
+
+| | P1 (Accum) | P2 (Markup) | P3 (Distrib) | P4 (Markdown) |
+|---|---|---|---|---|
+| zero_dte | 0.7 | 0.8 | 0.7 | 0.4 |
+| leap | 0.9 | 0.7 | 0.2 | 0.1 |
+| breakout | 1.0 | 0.5 | 0.3 | 0.2 |
+| momentum | 0.3 | 1.0 | 0.4 | 0.6 |
+
+**Returns:** `TradeRankingResult`
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `as_of_date` | `date` | Ranking date |
+| `tickers` | `list[str]` | Tickers assessed |
+| `top_trades` | `list[RankedEntry]` | All entries sorted by score desc |
+| `by_ticker` | `dict[str, list[RankedEntry]]` | Per-ticker, best first |
+| `by_strategy` | `dict[StrategyType, list[RankedEntry]]` | Per-strategy, best first |
+| `black_swan_level` | `str` | Current alert level |
+| `black_swan_gate` | `bool` | True if CRITICAL (all halted) |
+| `total_assessed` | `int` | Total ticker x strategy pairs |
+| `total_actionable` | `int` | Entries with verdict != NO_GO |
+| `summary` | `str` | Human-readable summary |
+
+`RankedEntry` fields:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `rank` | `int` | 1-based rank |
+| `ticker` | `str` | Instrument |
+| `strategy_type` | `StrategyType` | ZERO_DTE / LEAP / BREAKOUT / MOMENTUM |
+| `verdict` | `Verdict` | GO / CAUTION / NO_GO |
+| `composite_score` | `float` | 0.0-1.0 final score |
+| `breakdown` | `ScoreBreakdown` | All component scores |
+| `strategy_name` | `str` | Specific strategy (e.g. "iron_condor") |
+| `direction` | `str` | "neutral" / "bullish" / "bearish" |
+| `rationale` | `str` | Why this strategy |
+| `risk_notes` | `list[str]` | Risk warnings |
+
+**ML hook:** `WeightProvider` ABC allows swapping config-based weights for learned weights in the future.
+
+```python
+# Record feedback for future RL training
+from market_analyzer import RankingFeedback, StrategyType, Verdict
+
+feedback = RankingFeedback(
+    as_of_date=date.today(),
+    ticker="SPY",
+    strategy_type=StrategyType.ZERO_DTE,
+    composite_score=0.85,
+    verdict=Verdict.GO,
+    outcome_5d_return=0.012,
+    outcome_20d_return=0.03,
+)
+ma.ranking.record_feedback(feedback)
+```
+
+**Configuration** (`~/.market_analyzer/config.yaml`):
+
+```yaml
+ranking:
+  weights:
+    verdict: 0.25
+    confidence: 0.25
+    regime_alignment: 0.15
+    risk_reward: 0.15
+    technical_quality: 0.10
+    phase_alignment: 0.10
+  income_bias_boost: 0.05
+  macro_penalty_per_event: 0.02
+  macro_penalty_max: 0.10
+  earnings_penalty: 0.10
+  earnings_proximity_days: 3
+  risk_reward_excellent: 3.0
+  risk_reward_good: 2.0
+  risk_reward_fair: 1.0
+```
+
 ---
 
 ## Standalone Functions
@@ -992,6 +1179,7 @@ technicals:
 | `opportunity.leap` | LEAP hard stop thresholds, fundamental scoring, verdict thresholds |
 | `opportunity.breakout` | Breakout hard stop thresholds, pattern detection, verdict thresholds |
 | `opportunity.momentum` | Momentum hard stop thresholds, scoring weights, verdict thresholds |
+| `ranking` | Scoring weights, bias/penalty parameters, R:R thresholds |
 | `orb` | Opening range minutes, extension multipliers |
 | `cache` | Staleness hours, cache directory |
 | `fundamentals` | TTL cache minutes |
@@ -1201,6 +1389,7 @@ market_analyzer.PhaseService
 market_analyzer.FundamentalService
 market_analyzer.MacroService
 market_analyzer.OpportunityService
+market_analyzer.TradeRankingService
 market_analyzer.DataService
 
 # Config
@@ -1276,6 +1465,23 @@ market_analyzer.assess_zero_dte
 market_analyzer.assess_leap
 market_analyzer.assess_breakout
 market_analyzer.assess_momentum
+
+# Black Swan
+market_analyzer.AlertLevel
+market_analyzer.BlackSwanAlert
+market_analyzer.CircuitBreaker
+market_analyzer.IndicatorStatus
+market_analyzer.StressIndicator
+market_analyzer.BlackSwanService
+market_analyzer.compute_black_swan_alert
+
+# Ranking
+market_analyzer.TradeRankingService
+market_analyzer.StrategyType
+market_analyzer.ScoreBreakdown
+market_analyzer.RankedEntry
+market_analyzer.TradeRankingResult
+market_analyzer.RankingFeedback
 
 # Functions
 market_analyzer.compute_features

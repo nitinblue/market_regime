@@ -35,6 +35,7 @@ from market_analyzer.service.technical import TechnicalService
 from market_analyzer.service.phase import PhaseService
 from market_analyzer.service.fundamental import FundamentalService
 from market_analyzer.service.macro import MacroService
+from market_analyzer.service.levels import LevelsService
 from market_analyzer.service.opportunity import OpportunityService
 from market_analyzer.data.service import DataService
 
@@ -50,6 +51,15 @@ from market_analyzer.models.macro import MacroCalendar, MacroEvent, MacroEventTy
 from market_analyzer.macro.calendar import get_macro_calendar
 
 # Opportunity assessment
+from market_analyzer.models.levels import (
+    LevelRole,
+    LevelSource,
+    LevelsAnalysis,
+    PriceLevel,
+    StopLoss,
+    Target,
+    TradeDirection,
+)
 from market_analyzer.models.opportunity import (
     BreakoutOpportunity,
     LEAPOpportunity,
@@ -78,6 +88,7 @@ __all__ = [
     "PhaseService",
     "FundamentalService",
     "MacroService",
+    "LevelsService",
     "OpportunityService",
     "DataService",
     # Regime models
@@ -122,6 +133,14 @@ __all__ = [
     "MacroEvent",
     "MacroEventType",
     "get_macro_calendar",
+    # Levels models
+    "LevelRole",
+    "LevelSource",
+    "LevelsAnalysis",
+    "PriceLevel",
+    "StopLoss",
+    "Target",
+    "TradeDirection",
     # Opportunity models
     "Verdict",
     "ZeroDTEOpportunity",

@@ -193,6 +193,35 @@ opportunity:
       3: 1.0
       4: 0.75
 
+levels:
+  confluence_proximity_pct: 0.5
+  min_stop_distance_pct: 0.3
+  max_stop_distance_pct: 5.0
+  atr_stop_buffer_multiple: 0.5
+  atr_fallback_multiple: 2.0
+  min_target_distance_pct: 0.5
+  min_risk_reward: 1.5
+  max_targets: 3
+  max_strength_denominator: 3.0
+  source_weights:
+    swing_support: 1.0
+    swing_resistance: 1.0
+    order_block_high: 0.9
+    order_block_low: 0.9
+    vcp_pivot: 0.85
+    sma_200: 0.8
+    sma_50: 0.7
+    fvg_high: 0.7
+    fvg_low: 0.7
+    sma_20: 0.5
+    ema_21: 0.5
+    bollinger_upper: 0.5
+    bollinger_middle: 0.5
+    bollinger_lower: 0.5
+    vwma_20: 0.5
+    ema_9: 0.4
+    orb_level: 0.6
+
 orb:
   opening_minutes: 30
   extensions: [1.0, 1.5, 2.0]

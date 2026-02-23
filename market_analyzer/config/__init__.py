@@ -246,6 +246,37 @@ class OpportunitySettings(BaseModel):
     momentum: MomentumSettings = Field(default_factory=MomentumSettings)
 
 
+class LevelsSettings(BaseModel):
+    confluence_proximity_pct: float = 0.5
+    min_stop_distance_pct: float = 0.3
+    max_stop_distance_pct: float = 5.0
+    atr_stop_buffer_multiple: float = 0.5
+    atr_fallback_multiple: float = 2.0
+    min_target_distance_pct: float = 0.5
+    min_risk_reward: float = 1.5
+    max_targets: int = 3
+    max_strength_denominator: float = 3.0
+    source_weights: dict[str, float] = Field(default_factory=lambda: {
+        "swing_support": 1.0,
+        "swing_resistance": 1.0,
+        "order_block_high": 0.9,
+        "order_block_low": 0.9,
+        "vcp_pivot": 0.85,
+        "sma_200": 0.8,
+        "sma_50": 0.7,
+        "fvg_high": 0.7,
+        "fvg_low": 0.7,
+        "sma_20": 0.5,
+        "ema_21": 0.5,
+        "bollinger_upper": 0.5,
+        "bollinger_middle": 0.5,
+        "bollinger_lower": 0.5,
+        "vwma_20": 0.5,
+        "ema_9": 0.4,
+        "orb_level": 0.6,
+    })
+
+
 class ORBSettings(BaseModel):
     opening_minutes: int = 30
     extensions: list[float] = Field(default_factory=lambda: [1.0, 1.5, 2.0])
@@ -273,6 +304,7 @@ class Settings(BaseModel):
     fundamentals: FundamentalsSettings = Field(default_factory=FundamentalsSettings)
     macro: MacroSettings = Field(default_factory=MacroSettings)
     opportunity: OpportunitySettings = Field(default_factory=OpportunitySettings)
+    levels: LevelsSettings = Field(default_factory=LevelsSettings)
     orb: ORBSettings = Field(default_factory=ORBSettings)
     display: DisplaySettings = Field(default_factory=DisplaySettings)
 

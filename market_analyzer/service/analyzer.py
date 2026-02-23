@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 
 from market_analyzer.models.regime import RegimeConfig
 from market_analyzer.service.fundamental import FundamentalService
+from market_analyzer.service.levels import LevelsService
 from market_analyzer.service.macro import MacroService
 from market_analyzer.service.opportunity import OpportunityService
 from market_analyzer.service.phase import PhaseService
@@ -46,6 +47,11 @@ class MarketAnalyzer:
         )
         self.fundamentals = FundamentalService()
         self.macro = MacroService()
+        self.levels = LevelsService(
+            technical_service=self.technicals,
+            regime_service=self.regime,
+            data_service=data_service,
+        )
         self.opportunity = OpportunityService(
             regime_service=self.regime,
             technical_service=self.technicals,

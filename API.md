@@ -1,6 +1,6 @@
 # market_analyzer — API Reference
 
-**Market analysis toolkit: HMM regime detection, technicals, phase detection, and opportunity assessment for options trading.**
+**Market analysis toolkit: HMM regime detection, technicals, unified price levels with R:R, phase detection, and opportunity assessment for options trading.**
 
 ---
 
@@ -18,6 +18,10 @@ print(f"{regime.ticker}: R{regime.regime} ({regime.confidence:.0%})")
 # Full technical snapshot
 tech = ma.technicals.snapshot("SPY")
 print(f"RSI: {tech.rsi.value:.1f}, ATR: {tech.atr_pct:.2f}%")
+
+# Unified price levels with stop loss, targets, R:R
+levels = ma.levels.analyze("SPY")
+print(f"Stop: ${levels.stop_loss.price:.2f}, Best R:R: {levels.best_target.risk_reward_ratio:.1f}")
 
 # Should I trade 0DTE today?
 z = ma.opportunity.assess_zero_dte("SPY")
@@ -41,22 +45,23 @@ print(f"Momentum: {mo.verdict} — {mo.momentum_strategy}")
 ## Architecture Overview
 
 ```
-┌───────────────────────────────────────────────────────────────┐
-│  MarketAnalyzer  (facade — composes all services)             │
-│                                                               │
-│  .regime        → RegimeService        HMM regime R1–R4       │
-│  .technicals    → TechnicalService     RSI, MACD, VCP, ORB    │
-│  .phase         → PhaseService         Wyckoff P1–P4          │
-│  .fundamentals  → FundamentalService   Valuation, earnings     │
-│  .macro         → MacroService         FOMC, CPI, NFP, PCE    │
-│  .opportunity   → OpportunityService   0DTE, LEAP, BO, MOM    │
-│  .data          → DataService          Cache-first OHLCV       │
-└───────────────────────────┬───────────────────────────────────┘
-                            │
-                    ┌───────┴────────┐
-                    │  DataService   │
-                    │ (cache-first)  │
-                    └────────────────┘
+┌──────────────────────────────────────────────────────────────────┐
+│  MarketAnalyzer  (facade — composes all services)                │
+│                                                                  │
+│  .regime        → RegimeService        HMM regime R1–R4          │
+│  .technicals    → TechnicalService     RSI, MACD, VCP, ORB       │
+│  .levels        → LevelsService        S/R, stop, targets, R:R   │
+│  .phase         → PhaseService         Wyckoff P1–P4             │
+│  .fundamentals  → FundamentalService   Valuation, earnings       │
+│  .macro         → MacroService         FOMC, CPI, NFP, PCE       │
+│  .opportunity   → OpportunityService   0DTE, LEAP, BO, MOM       │
+│  .data          → DataService          Cache-first OHLCV          │
+└──────────────────────────┬───────────────────────────────────────┘
+                           │
+                   ┌───────┴────────┐
+                   │  DataService   │
+                   │ (cache-first)  │
+                   └────────────────┘
 ```
 
 Each service is independently usable:
@@ -73,8 +78,8 @@ Three conceptual layers:
 | Layer | What it does | Examples |
 |-------|-------------|---------|
 | **Analysis** | Produces signals & indicators | Regime R1–R4, RSI, Phase P1–P4, ORB |
+| **Levels** | Unified price levels, stop/target/R:R | Confluence S/R, stop loss, targets |
 | **Opportunity** | Per-horizon go/no-go + recommended strategy | "0DTE: GO, sell iron condor" |
-| **Strategy** | Specific trade structure (data only) | "Iron Condor", "Bull Call LEAP 18mo" |
 
 ---
 
@@ -218,7 +223,135 @@ for sig in technicals.signals:
 
 ---
 
-### 4. Phase Detection — "Where is this stock in its Wyckoff cycle?"
+### 4. Unified Price Levels — "Where are the key levels, and what's my R:R?"
+
+Synthesizes all price level sources (swing S/R, MAs, Bollinger, VCP pivot, order blocks, FVGs, ORB, VWAP) into ranked support/resistance levels with confluence scoring, stop loss, take profit targets, and risk/reward ratios.
+
+```python
+# Basic usage — auto-detects direction from regime/phase
+analysis = ma.levels.analyze("SPY")
+
+# Ranked support levels (nearest first)
+for lvl in analysis.support_levels:
+    print(f"  S ${lvl.price:.2f} — strength={lvl.strength:.2f} sources={lvl.sources}")
+
+# Ranked resistance levels (nearest first)
+for lvl in analysis.resistance_levels:
+    print(f"  R ${lvl.price:.2f} — strength={lvl.strength:.2f} sources={lvl.sources}")
+
+# Trade planning
+print(f"Direction: {analysis.direction}")
+print(f"Entry: ${analysis.entry_price:.2f}")
+if analysis.stop_loss:
+    print(f"Stop: ${analysis.stop_loss.price:.2f} ({analysis.stop_loss.distance_pct:.1f}%)")
+    print(f"  Risk/share: ${analysis.stop_loss.dollar_risk_per_share:.2f}")
+for i, t in enumerate(analysis.targets, 1):
+    print(f"  T{i}: ${t.price:.2f} R:R={t.risk_reward_ratio:.1f}")
+if analysis.best_target:
+    print(f"Best: ${analysis.best_target.price:.2f} R:R={analysis.best_target.risk_reward_ratio:.1f}")
+
+print(analysis.summary)
+# "SPY LONG | Entry $595.00 | Stop $590.50 (0.8%) | Best target $605.00 R:R=2.2 | 4S/3R levels"
+
+# Override entry & direction
+analysis = ma.levels.analyze("AAPL", entry_price=175.50, direction="long")
+
+# Include ORB levels (intraday)
+analysis = ma.levels.analyze("SPY", include_orb=True)
+
+# Or standalone
+from market_analyzer import LevelsService, TechnicalService, DataService
+ds = DataService()
+svc = LevelsService(
+    technical_service=TechnicalService(data_service=ds),
+)
+analysis = svc.analyze("SPY")
+
+# Pure function (bring your own TechnicalSnapshot)
+from market_analyzer.features.levels import compute_levels
+analysis = compute_levels(my_technicals, regime=my_regime, direction="long")
+```
+
+**How it works:**
+
+1. **Extract** raw price levels from 8+ sources in `TechnicalSnapshot`:
+
+| Source | Extraction | Weight |
+|--------|-----------|--------|
+| Swing S/R | `support_resistance.support/resistance` | 1.0 |
+| Order Blocks | Non-broken OB high/low | 0.9 |
+| VCP Pivot | `vcp.pivot_price` | 0.85 |
+| SMA 200 | `moving_averages.sma_200` | 0.8 |
+| SMA 50, FVGs | `sma_50`, unfilled FVG high/low | 0.7 |
+| SMA 20, EMA 21, Bollinger, VWMA | Dynamic short-term levels | 0.5 |
+| EMA 9 | Very short-term | 0.4 |
+| ORB levels | Extension levels (if intraday) | 0.6 |
+
+2. **Cluster** nearby levels within 0.5% proximity into confluence zones. Each cluster gets:
+   - `confluence_score` = count of distinct sources merged
+   - `strength` = sum of source weights / 3.0, capped at 1.0
+
+3. **Classify** as support (below entry) or resistance (above entry), sorted nearest-first.
+
+4. **Stop loss** from first support/resistance beyond min distance (0.3%), minus ATR buffer (0.5× ATR). Fallback: 2× ATR if no qualifying level.
+
+5. **Targets** (up to 3) from opposite-side levels beyond min distance (0.5%). R:R = reward / risk for each.
+
+6. **Direction auto-detection** priority: regime `trend_direction` → phase (markup/accumulation=long) → price vs SMA 50. Always overridable via `direction` parameter.
+
+**Returns:** `LevelsAnalysis`
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `ticker` | `str` | Instrument symbol |
+| `as_of_date` | `date` | Analysis date |
+| `entry_price` | `float` | Entry price (current or overridden) |
+| `direction` | `TradeDirection` | LONG or SHORT |
+| `direction_auto_detected` | `bool` | True if direction was auto-detected |
+| `current_price` | `float` | Latest price from snapshot |
+| `atr` / `atr_pct` | `float` | ATR in dollars and as % of price |
+| `support_levels` | `list[PriceLevel]` | Ranked support, nearest first (desc) |
+| `resistance_levels` | `list[PriceLevel]` | Ranked resistance, nearest first (asc) |
+| `stop_loss` | `StopLoss \| None` | Computed stop with ATR buffer |
+| `targets` | `list[Target]` | Up to 3 targets, ordered by distance |
+| `best_target` | `Target \| None` | Highest R:R above 1.5 threshold |
+| `summary` | `str` | One-line human-readable summary |
+
+`PriceLevel` fields:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `price` | `float` | Level price |
+| `role` | `LevelRole` | SUPPORT or RESISTANCE |
+| `sources` | `list[LevelSource]` | All contributing sources |
+| `confluence_score` | `int` | Count of distinct sources |
+| `strength` | `float` | 0.0–1.0 weighted confluence |
+| `distance_pct` | `float` | % distance from entry (negative = below) |
+| `description` | `str` | Human-readable description |
+
+`StopLoss` fields:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `price` | `float` | Stop price |
+| `distance_pct` | `float` | % distance from entry (always positive) |
+| `dollar_risk_per_share` | `float` | Dollar risk per share |
+| `level` | `PriceLevel` | Underlying support/resistance level |
+| `atr_buffer` | `float` | ATR buffer applied |
+
+`Target` fields:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `price` | `float` | Target price |
+| `distance_pct` | `float` | % distance from entry |
+| `dollar_reward_per_share` | `float` | Dollar reward per share |
+| `risk_reward_ratio` | `float` | R:R = reward / risk |
+| `level` | `PriceLevel` | Underlying resistance/support level |
+
+---
+
+### 5. Phase Detection — "Where is this stock in its Wyckoff cycle?"
 
 Detect accumulation/markup/distribution/markdown phases using regime history + price structure.
 
@@ -269,7 +402,7 @@ print(f"  Volume trend: {ps.volume_trend}")
 
 ---
 
-### 5. 0DTE Opportunity Assessment — "Should I trade 0DTE today?"
+### 6. 0DTE Opportunity Assessment — "Should I trade 0DTE today?"
 
 Combines regime, technicals, ORB, macro calendar, and fundamentals into a single go/no-go verdict with strategy recommendation.
 
@@ -355,7 +488,7 @@ print(z.summary)
 
 ---
 
-### 6. LEAP Opportunity Assessment — "Is this a good LEAP candidate?"
+### 7. LEAP Opportunity Assessment — "Is this a good LEAP candidate?"
 
 Combines regime, phase, technicals, fundamentals, and macro into a long-horizon (1–2 year) opportunity verdict.
 
@@ -452,7 +585,7 @@ Missing data defaults to 0.5 (neutral). ETFs with no earnings data handled grace
 
 ---
 
-### 7. Breakout Opportunity Assessment — "Is a breakout setting up?"
+### 8. Breakout Opportunity Assessment — "Is a breakout setting up?"
 
 Detects VCP, Bollinger squeeze, flag patterns, and evaluates breakout readiness using regime, technicals, phase, and smart money alignment.
 
@@ -545,7 +678,7 @@ print(bo.summary)
 
 ---
 
-### 8. Momentum Opportunity Assessment — "Is momentum tradeable?"
+### 9. Momentum Opportunity Assessment — "Is momentum tradeable?"
 
 Evaluates trend continuation, pullback, acceleration, and fade opportunities using MACD, RSI, MA alignment, stochastic, and volume confirmation.
 
@@ -639,7 +772,7 @@ print(mo.summary)
 
 ---
 
-### 9. Opening Range Breakout — "What's the ORB setup today?"
+### 10. Opening Range Breakout — "What's the ORB setup today?"
 
 Compute first-30-minute opening range, detect breakouts, and provide extension levels.
 
@@ -674,7 +807,7 @@ for sig in orb.signals:
 
 ---
 
-### 10. Fundamentals — "What are the fundamentals?"
+### 11. Fundamentals — "What are the fundamentals?"
 
 Stock fundamentals via yfinance with in-memory TTL cache.
 
@@ -697,7 +830,7 @@ print(f"  in {fund.upcoming_events.days_to_earnings} days")
 
 ---
 
-### 11. Macro Calendar — "What macro events are coming?"
+### 12. Macro Calendar — "What macro events are coming?"
 
 Pre-built calendar of FOMC, CPI, NFP, PCE, GDP events (2025–2027).
 
@@ -727,7 +860,7 @@ for e in macro.events_next_7_days:
 
 ---
 
-### 12. Historical Data — "Get OHLCV data"
+### 13. Historical Data — "Get OHLCV data"
 
 Cache-first historical data service. Checks local parquet cache, fetches only missing dates.
 
@@ -775,6 +908,10 @@ from market_analyzer import (
 features_df = compute_features(my_ohlcv_df)
 snapshot = compute_technicals(my_ohlcv_df, ticker="AAPL")
 
+# Pure levels computation (bring your own TechnicalSnapshot)
+from market_analyzer.features.levels import compute_levels
+analysis = compute_levels(my_technicals, regime=my_regime, direction="long", entry_price=175.50)
+
 # Pure assessment functions (no data fetching)
 from market_analyzer.opportunity.breakout import assess_breakout
 result = assess_breakout(
@@ -801,34 +938,45 @@ print(settings.opportunity.zero_dte.go_threshold)      # 0.55
 print(settings.opportunity.leap.go_threshold)           # 0.50
 print(settings.opportunity.breakout.go_threshold)       # 0.50
 print(settings.opportunity.momentum.go_threshold)       # 0.50
-print(settings.regime.n_states)                         # 4
-print(settings.cache.staleness_hours)                   # 18.0
+print(settings.levels.confluence_proximity_pct)          # 0.5
+print(settings.levels.min_risk_reward)                   # 1.5
+print(settings.regime.n_states)                          # 4
+print(settings.cache.staleness_hours)                    # 18.0
 ```
 
 Override defaults by creating `~/.market_analyzer/config.yaml`:
 
 ```yaml
 # Override any default setting
+levels:
+  confluence_proximity_pct: 0.75    # Wider clustering
+  min_risk_reward: 2.0              # Stricter R:R threshold
+  max_targets: 4                    # More targets
+  atr_stop_buffer_multiple: 0.75    # Larger ATR buffer on stops
+  source_weights:
+    swing_support: 1.2              # Boost swing S/R weight
+    order_block_high: 1.0
+
 opportunity:
   zero_dte:
-    go_threshold: 0.60          # Stricter 0DTE go threshold
-    min_atr_pct: 0.4            # Require more movement
+    go_threshold: 0.60              # Stricter 0DTE go threshold
+    min_atr_pct: 0.4                # Require more movement
   leap:
-    go_threshold: 0.45          # More lenient LEAP threshold
-    earnings_blackout_days: 7   # Wider earnings buffer
+    go_threshold: 0.45              # More lenient LEAP threshold
+    earnings_blackout_days: 7       # Wider earnings buffer
   breakout:
-    go_threshold: 0.55          # Stricter breakout threshold
+    go_threshold: 0.55              # Stricter breakout threshold
     earnings_blackout_days: 3
   momentum:
-    go_threshold: 0.55          # Stricter momentum threshold
+    go_threshold: 0.55              # Stricter momentum threshold
     rsi_extreme_high: 80
 
 cache:
-  staleness_hours: 12           # Fresher data
+  staleness_hours: 12               # Fresher data
 
 technicals:
   rsi_period: 14
-  rsi_overbought: 75            # Less sensitive overbought
+  rsi_overbought: 75                # Less sensitive overbought
 ```
 
 ### Key configuration sections
@@ -839,6 +987,7 @@ technicals:
 | `features` | Feature windows (vol, ATR, trend, volume) |
 | `technicals` | MA periods, RSI/Bollinger/MACD params, VCP settings |
 | `phases` | Swing detection, phase transition thresholds |
+| `levels` | Confluence proximity, stop/target distances, ATR buffers, R:R threshold, source weights |
 | `opportunity.zero_dte` | 0DTE hard stop thresholds, scoring weights, verdict thresholds |
 | `opportunity.leap` | LEAP hard stop thresholds, fundamental scoring, verdict thresholds |
 | `opportunity.breakout` | Breakout hard stop thresholds, pattern detection, verdict thresholds |
@@ -854,6 +1003,11 @@ technicals:
 
 ```python
 from market_analyzer import RegimeID, PhaseID, TrendDirection
+from market_analyzer.models.levels import (
+    LevelSource,
+    LevelRole,
+    TradeDirection,
+)
 from market_analyzer.models.opportunity import (
     Verdict,
     ZeroDTEStrategy,
@@ -879,6 +1033,33 @@ PhaseID.MARKDOWN       # 4
 # Trend
 TrendDirection.BULLISH
 TrendDirection.BEARISH
+
+# Trade direction (for levels)
+TradeDirection.LONG
+TradeDirection.SHORT
+
+# Level role
+LevelRole.SUPPORT
+LevelRole.RESISTANCE
+
+# Level sources (17 sources)
+LevelSource.SWING_SUPPORT        # Historic S/R
+LevelSource.SWING_RESISTANCE
+LevelSource.SMA_20               # Moving averages
+LevelSource.SMA_50
+LevelSource.SMA_200
+LevelSource.EMA_9
+LevelSource.EMA_21
+LevelSource.BOLLINGER_UPPER      # Bollinger Bands
+LevelSource.BOLLINGER_MIDDLE
+LevelSource.BOLLINGER_LOWER
+LevelSource.VWMA_20              # Volume-weighted MA
+LevelSource.VCP_PIVOT            # VCP pattern pivot
+LevelSource.ORDER_BLOCK_HIGH     # Smart money OB zones
+LevelSource.ORDER_BLOCK_LOW
+LevelSource.FVG_HIGH             # Fair value gaps
+LevelSource.FVG_LOW
+LevelSource.ORB_LEVEL            # Opening range breakout
 
 # Opportunity verdicts
 Verdict.GO             # Conditions favor trading
@@ -937,6 +1118,7 @@ from market_analyzer import MarketAnalyzer, DataService
 
 ma = MarketAnalyzer(data_service=DataService())
 regime = ma.regime.detect("SPY")
+levels = ma.levels.analyze("SPY")
 bo = ma.opportunity.assess_breakout("SPY")
 ```
 
@@ -945,14 +1127,16 @@ bo = ma.opportunity.assess_breakout("SPY")
 Use specific services when you only need one capability.
 
 ```python
-from market_analyzer import RegimeService, TechnicalService, DataService
+from market_analyzer import RegimeService, TechnicalService, LevelsService, DataService
 
 ds = DataService()
 regime_svc = RegimeService(data_service=ds)
 tech_svc = TechnicalService(data_service=ds)
+levels_svc = LevelsService(technical_service=tech_svc, regime_service=regime_svc)
 
 result = regime_svc.detect("SPY")
 snap = tech_svc.snapshot("SPY")
+analysis = levels_svc.analyze("SPY")
 ```
 
 ### Pattern 3: Bring your own data
@@ -960,13 +1144,16 @@ snap = tech_svc.snapshot("SPY")
 Provide pre-fetched DataFrames. Useful when you already have data from another source.
 
 ```python
-from market_analyzer import RegimeService, TechnicalService
+from market_analyzer import RegimeService, TechnicalService, LevelsService
 
 regime_svc = RegimeService()             # no DataService
 result = regime_svc.detect("SPY", ohlcv=my_df)
 
 tech_svc = TechnicalService()
 snap = tech_svc.snapshot("SPY", ohlcv=my_df)
+
+levels_svc = LevelsService(technical_service=tech_svc)
+analysis = levels_svc.analyze("SPY", ohlcv=my_df, direction="long", entry_price=595.0)
 ```
 
 ### Pattern 4: Composable pure functions
@@ -974,10 +1161,14 @@ snap = tech_svc.snapshot("SPY", ohlcv=my_df)
 Use standalone functions for maximum control. Each function takes pre-computed inputs and returns a model — no side effects.
 
 ```python
+from market_analyzer.features.levels import compute_levels
 from market_analyzer.opportunity.zero_dte import assess_zero_dte
 from market_analyzer.opportunity.breakout import assess_breakout
 
-# You manage the data pipeline; we just score
+# Levels from pre-computed snapshot
+analysis = compute_levels(my_technicals, regime=my_regime, direction="long")
+
+# Opportunity scoring from pre-computed inputs
 z = assess_zero_dte("SPY", regime=r, technicals=t, macro=m)
 bo = assess_breakout("SPY", regime=r, technicals=t, phase=p, macro=m)
 ```
@@ -1005,6 +1196,7 @@ market_analyzer.MarketAnalyzer
 # Services
 market_analyzer.RegimeService
 market_analyzer.TechnicalService
+market_analyzer.LevelsService
 market_analyzer.PhaseService
 market_analyzer.FundamentalService
 market_analyzer.MacroService
@@ -1064,6 +1256,15 @@ market_analyzer.MacroCalendar
 market_analyzer.MacroEvent
 market_analyzer.MacroEventType
 market_analyzer.get_macro_calendar
+
+# Levels
+market_analyzer.LevelRole
+market_analyzer.LevelSource
+market_analyzer.LevelsAnalysis
+market_analyzer.PriceLevel
+market_analyzer.StopLoss
+market_analyzer.Target
+market_analyzer.TradeDirection
 
 # Opportunity
 market_analyzer.Verdict

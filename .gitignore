@@ -34,5 +34,18 @@ Thumbs.db
 *.joblib
 *.parquet
 
+# Environment / secrets
+.env
+.env.*
+credentials.json
+
 # Workspace files
 *.code-workspace
+
+# Logs
+*.log
+
+# Distribution / packaging
+*.whl
+*.tar.gz
+MANIFEST

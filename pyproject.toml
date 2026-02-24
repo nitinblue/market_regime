@@ -24,6 +24,7 @@ dependencies = [
 [project.optional-dependencies]
 plot = ["matplotlib>=3.5"]
 tastytrade = ["tastytrade-sdk"]
+fred = ["fredapi>=0.5"]
 dev = [
     "pytest>=7.0",
     "pytest-mock>=3.0",

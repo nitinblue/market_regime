@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 import pandas as pd
@@ -34,10 +34,22 @@ class DataService:
         reg.register(YFinanceProvider())
         return reg
 
+    # Default lookback when no start_date provided (2 years covers HMM training needs)
+    DEFAULT_LOOKBACK_DAYS = 730
+
     def get(self, request: DataRequest) -> tuple[pd.DataFrame, DataResult]:
         """Get data (cache-first, delta-fetch if stale)."""
         provider = self._registry.resolve(request.ticker, request.data_type)
         end_date = request.end_date or date.today()
+        # Default to 2-year lookback if no start_date — ensures enough data for
+        # feature normalization (~40 days) and HMM training (~2 years)
+        if request.start_date is None:
+            request = DataRequest(
+                ticker=request.ticker,
+                data_type=request.data_type,
+                start_date=end_date - timedelta(days=self.DEFAULT_LOOKBACK_DAYS),
+                end_date=request.end_date,
+            )
 
         # Check cache
         cached_df = self._cache.read(request.ticker, request.data_type)

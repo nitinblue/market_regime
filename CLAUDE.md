@@ -656,6 +656,14 @@ py -3.12 -m venv .venv
 .venv/Scripts/python -m pytest tests/test_price_structure.py -v
 .venv/Scripts/python -m pytest tests/test_analyzer.py -v
 .venv/Scripts/python -m pytest tests/test_ranking.py -v
+.venv/Scripts/python -m pytest tests/test_context.py -v
+.venv/Scripts/python -m pytest tests/test_instrument.py -v
+.venv/Scripts/python -m pytest tests/test_screening.py -v
+.venv/Scripts/python -m pytest tests/test_entry.py -v
+.venv/Scripts/python -m pytest tests/test_strategy.py -v
+.venv/Scripts/python -m pytest tests/test_exit.py -v
+.venv/Scripts/python -m pytest tests/test_mean_reversion.py -v
+.venv/Scripts/python -m pytest tests/test_earnings.py -v
 
 # Run a single test by name
 .venv/Scripts/python -m pytest tests/test_hmm.py::TestRegimeInference::test_predict_returns_regime_result -v
@@ -679,6 +687,10 @@ analyzer-explore --tickers GLD
 analyzer-plot
 analyzer-plot --tickers AAPL MSFT
 analyzer-plot --tickers GLD --save
+
+# Interactive REPL (Claude-like interface)
+analyzer-cli
+analyzer-cli --market india
 ```
 
 ### Script Wrappers (no install required)
@@ -756,6 +768,54 @@ for m in DataService().cache_status('SPY'):
 "
 ```
 
+### Workflow APIs (NEW)
+
+```bash
+# Market context (environment assessment)
+.venv/Scripts/python -c "
+from market_analyzer import MarketAnalyzer, DataService
+ma = MarketAnalyzer(data_service=DataService())
+ctx = ma.context.assess()
+print(f'Environment: {ctx.environment_label}, Trading: {ctx.trading_allowed}')
+"
+
+# Full instrument analysis
+.venv/Scripts/python -c "
+from market_analyzer import MarketAnalyzer, DataService
+ma = MarketAnalyzer(data_service=DataService())
+a = ma.instrument.analyze('SPY')
+print(f'{a.ticker}: R{a.regime_id} | {a.phase.phase_name} | RSI {a.technicals.rsi.value:.0f} | {a.trend_bias}')
+"
+
+# Screen for setups
+.venv/Scripts/python -c "
+from market_analyzer import MarketAnalyzer, DataService
+ma = MarketAnalyzer(data_service=DataService())
+result = ma.screening.scan(['SPY', 'GLD', 'QQQ', 'TLT'])
+for c in result.candidates[:5]:
+    print(f'{c.ticker} [{c.screen}] score={c.score:.2f}: {c.reason}')
+"
+
+# Entry confirmation
+.venv/Scripts/python -c "
+from market_analyzer import MarketAnalyzer, DataService, EntryTriggerType
+ma = MarketAnalyzer(data_service=DataService())
+e = ma.entry.confirm('SPY', EntryTriggerType.BREAKOUT_CONFIRMED)
+print(f'Entry: {\"CONFIRMED\" if e.confirmed else \"NOT CONFIRMED\"} ({e.confidence:.0%})')
+"
+
+# Strategy selection + sizing
+.venv/Scripts/python -c "
+from market_analyzer import MarketAnalyzer, DataService
+ma = MarketAnalyzer(data_service=DataService())
+r = ma.regime.detect('SPY')
+t = ma.technicals.snapshot('SPY')
+params = ma.strategy.select('SPY', regime=r, technicals=t)
+size = ma.strategy.size(params, current_price=t.current_price)
+print(f'{params.primary_structure.structure_type} | {size.suggested_contracts} contracts | max risk \${size.max_risk_dollars:.0f}')
+"
+```
+
 ### Cache Management
 
 ```bash
@@ -787,3 +847,4 @@ DataService().invalidate_cache('SPY', data_type=None)
 | 2026-02-21 | yfinance as optional dependency | Core library must work with caller-provided DataFrames |
 | 2026-02-21 | Label alignment via vol+trend axes | 2x2 sorting maps arbitrary HMM states to R1–R4 semantically |
 | 2026-02-21 | Expanded to canonical historical data service | market_analyzer owns all historical data for ecosystem; added DataService, parquet cache, three providers (yfinance, CBOE, TastyTrade); yfinance now required |
+| 2026-02-23 | Trading workflow restructure | Added 6 workflow services (context, instrument, screening, entry, strategy, exit), 5 new model files, multi-market config (US + India), interactive CLI (analyzer-cli), API.md. Additive — no existing files moved, all 580 tests pass. |

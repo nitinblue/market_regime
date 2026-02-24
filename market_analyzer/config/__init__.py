@@ -345,6 +345,85 @@ class DisplaySettings(BaseModel):
     plot: PlotSettings = Field(default_factory=PlotSettings)
 
 
+class MarketDef(BaseModel):
+    """Definition for a single market (US, India, etc.)."""
+
+    name: str
+    suffix: str = ""                    # "" for US, ".NS" for NSE, ".BO" for BSE
+    currency: str = "USD"
+    exchange: str = ""
+    timezone: str = "America/New_York"
+    market_open: str = "09:30"
+    market_close: str = "16:00"
+    reference_tickers: list[str] = Field(default_factory=list)
+    stress_vix_ticker: str = "^VIX"     # Market-specific VIX equivalent
+
+
+class MarketSettings(BaseModel):
+    """Multi-market configuration."""
+
+    default_market: str = "US"
+    markets: dict[str, MarketDef] = Field(default_factory=lambda: {
+        "US": MarketDef(
+            name="US",
+            suffix="",
+            currency="USD",
+            exchange="NYSE/NASDAQ",
+            timezone="America/New_York",
+            market_open="09:30",
+            market_close="16:00",
+            reference_tickers=["SPY", "QQQ", "TLT", "GLD", "HYG"],
+            stress_vix_ticker="^VIX",
+        ),
+        "India": MarketDef(
+            name="India",
+            suffix=".NS",
+            currency="INR",
+            exchange="NSE",
+            timezone="Asia/Kolkata",
+            market_open="09:15",
+            market_close="15:30",
+            reference_tickers=["^NSEI", "^NSEBANK", "GOLDBEES.NS"],
+            stress_vix_ticker="^INDIAVIX",
+        ),
+    })
+
+
+class ScreeningSettings(BaseModel):
+    """Settings for universe screening."""
+
+    min_volume_20d_avg: int = 500_000
+    min_price: float = 5.0
+    max_price: float = 10_000.0
+    breakout_proximity_pct: float = 3.0
+    mean_reversion_rsi_low: float = 25.0
+    mean_reversion_rsi_high: float = 75.0
+    income_regime_preference: list[int] = Field(default_factory=lambda: [1, 2])
+    momentum_min_rsi: float = 50.0
+
+
+class StrategySettings(BaseModel):
+    """Settings for strategy selection and sizing."""
+
+    default_account_size: float = 50_000.0
+    ira_account_size: float = 200_000.0
+    max_position_pct: float = 0.05          # 5% of account per position
+    max_portfolio_risk_pct: float = 0.20    # 20% total portfolio risk
+    default_dte_range: list[int] = Field(default_factory=lambda: [30, 45])
+    income_delta_range: list[float] = Field(default_factory=lambda: [0.15, 0.30])
+    directional_delta_range: list[float] = Field(default_factory=lambda: [0.30, 0.50])
+
+
+class ExitSettings(BaseModel):
+    """Settings for exit planning."""
+
+    profit_target_pcts: list[float] = Field(default_factory=lambda: [50.0, 75.0])
+    stop_loss_pct: float = 200.0            # 2x credit received for credit spreads
+    time_exit_dte: int = 7                  # Close at 7 DTE
+    theta_decay_exit_pct: float = 50.0      # Close at 50% max profit (income)
+    regime_change_review: bool = True       # Review on regime change
+
+
 class Settings(BaseModel):
     """Central config — loaded from YAML, overridable per-field."""
 
@@ -364,6 +443,10 @@ class Settings(BaseModel):
     ranking: RankingSettings = Field(default_factory=RankingSettings)
     black_swan: BlackSwanSettings = Field(default_factory=BlackSwanSettings)
     display: DisplaySettings = Field(default_factory=DisplaySettings)
+    markets: MarketSettings = Field(default_factory=MarketSettings)
+    screening: ScreeningSettings = Field(default_factory=ScreeningSettings)
+    strategy: StrategySettings = Field(default_factory=StrategySettings)
+    exit: ExitSettings = Field(default_factory=ExitSettings)
 
 
 # --- Loading ---

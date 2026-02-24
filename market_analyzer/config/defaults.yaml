@@ -288,3 +288,53 @@ display:
     legend_alpha: 0.9
     xaxis_rotation: 30
     month_interval: 2
+
+markets:
+  default_market: "US"
+  markets:
+    US:
+      name: "US"
+      suffix: ""
+      currency: "USD"
+      exchange: "NYSE/NASDAQ"
+      timezone: "America/New_York"
+      market_open: "09:30"
+      market_close: "16:00"
+      reference_tickers: ["SPY", "QQQ", "TLT", "GLD", "HYG"]
+      stress_vix_ticker: "^VIX"
+    India:
+      name: "India"
+      suffix: ".NS"
+      currency: "INR"
+      exchange: "NSE"
+      timezone: "Asia/Kolkata"
+      market_open: "09:15"
+      market_close: "15:30"
+      reference_tickers: ["^NSEI", "^NSEBANK", "GOLDBEES.NS"]
+      stress_vix_ticker: "^INDIAVIX"
+
+screening:
+  min_volume_20d_avg: 500000
+  min_price: 5.0
+  max_price: 10000.0
+  breakout_proximity_pct: 3.0
+  mean_reversion_rsi_low: 25.0
+  mean_reversion_rsi_high: 75.0
+  income_regime_preference: [1, 2]
+  momentum_min_rsi: 50.0
+
+strategy:
+  default_account_size: 50000.0
+  ira_account_size: 200000.0
+  max_position_pct: 0.05
+  max_portfolio_risk_pct: 0.20
+  default_dte_range: [30, 45]
+  income_delta_range: [0.15, 0.30]
+  directional_delta_range: [0.30, 0.50]
+
+exit:
+  profit_target_pcts: [50.0, 75.0]
+  stop_loss_pct: 200.0
+  time_exit_dte: 7
+  theta_decay_exit_pct: 50.0
+  regime_change_review: true

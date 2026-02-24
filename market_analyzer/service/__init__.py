@@ -10,6 +10,12 @@ from market_analyzer.service.levels import LevelsService
 from market_analyzer.service.opportunity import OpportunityService
 from market_analyzer.service.black_swan import BlackSwanService
 from market_analyzer.service.ranking import TradeRankingService
+from market_analyzer.service.context import MarketContextService
+from market_analyzer.service.instrument import InstrumentAnalysisService
+from market_analyzer.service.screening import ScreeningService
+from market_analyzer.service.entry import EntryService
+from market_analyzer.service.strategy import StrategyService
+from market_analyzer.service.exit import ExitService
 
 __all__ = [
     "MarketAnalyzer",
@@ -22,4 +28,10 @@ __all__ = [
     "OpportunityService",
     "BlackSwanService",
     "TradeRankingService",
+    "MarketContextService",
+    "InstrumentAnalysisService",
+    "ScreeningService",
+    "EntryService",
+    "StrategyService",
+    "ExitService",
 ]

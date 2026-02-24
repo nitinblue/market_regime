@@ -34,6 +34,7 @@ dev = [
 analyzer-explore = "market_analyzer.cli.explore:main"
 analyzer-plot = "market_analyzer.cli.plot:main"
 analyzer-rank = "market_analyzer.cli.rank:main"
+analyzer-cli = "market_analyzer.cli.interactive:main"
 
 [tool.pytest.ini_options]
 markers = [

@@ -1,7 +1,15 @@
 """Market analysis toolkit: regime detection, technicals, phase detection, and opportunity assessment."""
 
 # Config
-from market_analyzer.config import Settings, get_settings
+from market_analyzer.config import (
+    ExitSettings,
+    MarketDef,
+    MarketSettings,
+    ScreeningSettings,
+    Settings,
+    StrategySettings,
+    get_settings,
+)
 
 # Models
 from market_analyzer.models.regime import (
@@ -28,6 +36,24 @@ from market_analyzer.models.data import DataType, ProviderType, DataRequest, Dat
 from market_analyzer.models.features import FeatureConfig, FeatureInspection
 from market_analyzer.models.technicals import TechnicalSnapshot, TechnicalSignal
 
+# New workflow models
+from market_analyzer.models.context import IntermarketDashboard, IntermarketEntry, MarketContext
+from market_analyzer.models.instrument import InstrumentAnalysis
+from market_analyzer.models.entry import EntryConfirmation, EntryCondition, EntryTriggerType
+from market_analyzer.models.strategy import (
+    OptionStructure,
+    OptionStructureType,
+    PositionSize,
+    StrategyParameters,
+)
+from market_analyzer.models.exit_plan import (
+    AdjustmentTrigger,
+    AdjustmentTriggerType,
+    ExitPlan,
+    ExitReason,
+    ExitTarget,
+)
+
 # Services
 from market_analyzer.service.analyzer import MarketAnalyzer
 from market_analyzer.service.regime_service import RegimeService
@@ -40,6 +66,14 @@ from market_analyzer.service.opportunity import OpportunityService
 from market_analyzer.service.black_swan import BlackSwanService
 from market_analyzer.service.ranking import TradeRankingService
 from market_analyzer.data.service import DataService
+
+# New workflow services
+from market_analyzer.service.context import MarketContextService
+from market_analyzer.service.instrument import InstrumentAnalysisService
+from market_analyzer.service.screening import ScreeningService, ScreenCandidate, ScreeningResult
+from market_analyzer.service.entry import EntryService
+from market_analyzer.service.strategy import StrategyService
+from market_analyzer.service.exit import ExitService
 
 # Phase detection
 from market_analyzer.phases.detector import PhaseDetector
@@ -73,6 +107,8 @@ from market_analyzer.opportunity.zero_dte import assess_zero_dte
 from market_analyzer.opportunity.leap import assess_leap
 from market_analyzer.opportunity.breakout import assess_breakout
 from market_analyzer.opportunity.momentum import assess_momentum
+from market_analyzer.opportunity.mean_reversion import assess_mean_reversion
+from market_analyzer.opportunity.earnings import assess_earnings_play
 
 # Black Swan / Tail-Risk
 from market_analyzer.models.black_swan import (
@@ -99,9 +135,14 @@ __all__ = [
     # Config
     "Settings",
     "get_settings",
+    "MarketDef",
+    "MarketSettings",
+    "ScreeningSettings",
+    "StrategySettings",
+    "ExitSettings",
     # Services (facade)
     "MarketAnalyzer",
-    # Services (individual)
+    # Services (individual — existing)
     "RegimeService",
     "TechnicalService",
     "PhaseService",
@@ -112,6 +153,13 @@ __all__ = [
     "BlackSwanService",
     "TradeRankingService",
     "DataService",
+    # Services (individual — new workflow)
+    "MarketContextService",
+    "InstrumentAnalysisService",
+    "ScreeningService",
+    "EntryService",
+    "StrategyService",
+    "ExitService",
     # Regime models
     "RegimeID",
     "RegimeResult",
@@ -146,6 +194,30 @@ __all__ = [
     # Technical models
     "TechnicalSnapshot",
     "TechnicalSignal",
+    # Context models (new)
+    "MarketContext",
+    "IntermarketDashboard",
+    "IntermarketEntry",
+    # Instrument models (new)
+    "InstrumentAnalysis",
+    # Entry models (new)
+    "EntryTriggerType",
+    "EntryCondition",
+    "EntryConfirmation",
+    # Strategy models (new)
+    "OptionStructureType",
+    "OptionStructure",
+    "StrategyParameters",
+    "PositionSize",
+    # Exit models (new)
+    "ExitPlan",
+    "ExitTarget",
+    "ExitReason",
+    "AdjustmentTrigger",
+    "AdjustmentTriggerType",
+    # Screening models (new)
+    "ScreenCandidate",
+    "ScreeningResult",
     # Fundamentals
     "FundamentalsSnapshot",
     "fetch_fundamentals",
@@ -172,6 +244,8 @@ __all__ = [
     "assess_leap",
     "assess_breakout",
     "assess_momentum",
+    "assess_mean_reversion",
+    "assess_earnings_play",
     # Black Swan
     "AlertLevel",
     "BlackSwanAlert",

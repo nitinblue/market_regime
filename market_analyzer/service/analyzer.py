@@ -14,6 +14,12 @@ from market_analyzer.service.black_swan import BlackSwanService
 from market_analyzer.service.ranking import TradeRankingService
 from market_analyzer.service.regime import RegimeService
 from market_analyzer.service.technical import TechnicalService
+from market_analyzer.service.context import MarketContextService
+from market_analyzer.service.instrument import InstrumentAnalysisService
+from market_analyzer.service.screening import ScreeningService
+from market_analyzer.service.entry import EntryService
+from market_analyzer.service.strategy import StrategyService
+from market_analyzer.service.exit import ExitService
 
 if TYPE_CHECKING:
     from market_analyzer.data.service import DataService
@@ -28,20 +34,33 @@ class MarketAnalyzer:
 
         ma = MarketAnalyzer(data_service=DataService())
 
+        # --- Existing APIs ---
         regime = ma.regime.detect("SPY")
         tech = ma.technicals.snapshot("SPY")
         phase = ma.phase.detect("SPY")
         fund = ma.fundamentals.get("SPY")
         macro = ma.macro.calendar()
         bo = ma.opportunity.assess_breakout("SPY")
+
+        # --- NEW workflow APIs ---
+        ctx = ma.context.assess()                     # Q1a: Environment safe?
+        analysis = ma.instrument.analyze("SPY")       # Q1b: What's the ticker doing?
+        candidates = ma.screening.scan(["SPY","GLD"]) # Q1c: Where are setups?
+        entry = ma.entry.confirm("SPY", EntryTriggerType.BREAKOUT_CONFIRMED)  # Q2
+        params = ma.strategy.select("SPY", regime=r, technicals=t)            # Q3
+        exit_plan = ma.exit.plan("SPY", params, entry_price=580.0,            # Q4
+                                 regime=r, technicals=t, levels=l)
     """
 
     def __init__(
         self,
         data_service: DataService | None = None,
         config: RegimeConfig = RegimeConfig(),
+        market: str | None = None,
     ) -> None:
         self.data = data_service
+
+        # --- Existing services (unchanged) ---
         self.regime = RegimeService(config=config, data_service=data_service)
         self.technicals = TechnicalService(data_service=data_service)
         self.phase = PhaseService(
@@ -68,4 +87,37 @@ class MarketAnalyzer:
             levels_service=self.levels,
             black_swan_service=self.black_swan,
             data_service=data_service,
+        )
+
+        # --- NEW workflow services ---
+        self.context = MarketContextService(
+            regime_service=self.regime,
+            macro_service=self.macro,
+            black_swan_service=self.black_swan,
+            market=market,
+        )
+        self.instrument = InstrumentAnalysisService(
+            regime_service=self.regime,
+            technical_service=self.technicals,
+            phase_service=self.phase,
+            levels_service=self.levels,
+            fundamental_service=self.fundamentals,
+            opportunity_service=self.opportunity,
+            data_service=data_service,
+        )
+        self.screening = ScreeningService(
+            regime_service=self.regime,
+            technical_service=self.technicals,
+            phase_service=self.phase,
+            data_service=data_service,
+        )
+        self.entry = EntryService(
+            technical_service=self.technicals,
+            levels_service=self.levels,
+            data_service=data_service,
+        )
+        self.strategy = StrategyService()
+        self.exit = ExitService(
+            levels_service=self.levels,
+            regime_service=self.regime,
         )

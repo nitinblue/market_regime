@@ -35,7 +35,10 @@ from market_analyzer.service.technical import TechnicalService
 from market_analyzer.service.phase import PhaseService
 from market_analyzer.service.fundamental import FundamentalService
 from market_analyzer.service.macro import MacroService
+from market_analyzer.service.levels import LevelsService
 from market_analyzer.service.opportunity import OpportunityService
+from market_analyzer.service.black_swan import BlackSwanService
+from market_analyzer.service.ranking import TradeRankingService
 from market_analyzer.data.service import DataService
 
 # Phase detection
@@ -50,6 +53,15 @@ from market_analyzer.models.macro import MacroCalendar, MacroEvent, MacroEventTy
 from market_analyzer.macro.calendar import get_macro_calendar
 
 # Opportunity assessment
+from market_analyzer.models.levels import (
+    LevelRole,
+    LevelSource,
+    LevelsAnalysis,
+    PriceLevel,
+    StopLoss,
+    Target,
+    TradeDirection,
+)
 from market_analyzer.models.opportunity import (
     BreakoutOpportunity,
     LEAPOpportunity,
@@ -61,6 +73,23 @@ from market_analyzer.opportunity.zero_dte import assess_zero_dte
 from market_analyzer.opportunity.leap import assess_leap
 from market_analyzer.opportunity.breakout import assess_breakout
 from market_analyzer.opportunity.momentum import assess_momentum
+
+# Black Swan / Tail-Risk
+from market_analyzer.models.black_swan import (
+    AlertLevel,
+    BlackSwanAlert,
+    CircuitBreaker,
+    IndicatorStatus,
+    StressIndicator,
+)
+from market_analyzer.models.ranking import (
+    RankedEntry,
+    RankingFeedback,
+    ScoreBreakdown,
+    StrategyType,
+    TradeRankingResult,
+)
+from market_analyzer.features.black_swan import compute_black_swan_alert
 
 # Features
 from market_analyzer.features.pipeline import compute_features
@@ -78,7 +107,10 @@ __all__ = [
     "PhaseService",
     "FundamentalService",
     "MacroService",
+    "LevelsService",
     "OpportunityService",
+    "BlackSwanService",
+    "TradeRankingService",
     "DataService",
     # Regime models
     "RegimeID",
@@ -122,6 +154,14 @@ __all__ = [
     "MacroEvent",
     "MacroEventType",
     "get_macro_calendar",
+    # Levels models
+    "LevelRole",
+    "LevelSource",
+    "LevelsAnalysis",
+    "PriceLevel",
+    "StopLoss",
+    "Target",
+    "TradeDirection",
     # Opportunity models
     "Verdict",
     "ZeroDTEOpportunity",
@@ -132,6 +172,19 @@ __all__ = [
     "assess_leap",
     "assess_breakout",
     "assess_momentum",
+    # Black Swan
+    "AlertLevel",
+    "BlackSwanAlert",
+    "CircuitBreaker",
+    "IndicatorStatus",
+    "StressIndicator",
+    "compute_black_swan_alert",
+    # Ranking
+    "StrategyType",
+    "ScoreBreakdown",
+    "RankedEntry",
+    "TradeRankingResult",
+    "RankingFeedback",
     # Functions
     "compute_features",
     "compute_technicals",

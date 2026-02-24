@@ -1,8 +1,8 @@
 """Interactive exploration harness for the regime detection pipeline.
 
 Usage (after pip install):
-    regime-explore
-    regime-explore --tickers SPY GLD QQQ TLT
+    analyzer-explore
+    analyzer-explore --tickers SPY GLD QQQ TLT
 """
 
 import argparse

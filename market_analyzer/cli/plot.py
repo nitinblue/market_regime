@@ -2,9 +2,9 @@
 volume, RSI, and confidence panels.
 
 Usage (after pip install):
-    regime-plot
-    regime-plot --tickers AAPL MSFT
-    regime-plot --tickers GLD --save
+    analyzer-plot
+    analyzer-plot --tickers AAPL MSFT
+    analyzer-plot --tickers GLD --save
 """
 
 import argparse

@@ -634,10 +634,10 @@ py -3.12 -m venv .venv
 ### Running Tests
 
 ```bash
-# All tests (87 tests)
+# All tests
 .venv/Scripts/python -m pytest tests/ -v
 
-# Single test file
+# Individual test files
 .venv/Scripts/python -m pytest tests/test_features.py -v
 .venv/Scripts/python -m pytest tests/test_hmm.py -v
 .venv/Scripts/python -m pytest tests/test_cache.py -v
@@ -645,6 +645,17 @@ py -3.12 -m venv .venv
 .venv/Scripts/python -m pytest tests/test_providers.py -v
 .venv/Scripts/python -m pytest tests/test_service.py -v
 .venv/Scripts/python -m pytest tests/test_regime_validation.py -v
+.venv/Scripts/python -m pytest tests/test_technicals.py -v
+.venv/Scripts/python -m pytest tests/test_phases.py -v
+.venv/Scripts/python -m pytest tests/test_fundamentals.py -v
+.venv/Scripts/python -m pytest tests/test_macro.py -v
+.venv/Scripts/python -m pytest tests/test_opportunity.py -v
+.venv/Scripts/python -m pytest tests/test_breakout.py -v
+.venv/Scripts/python -m pytest tests/test_momentum.py -v
+.venv/Scripts/python -m pytest tests/test_orb.py -v
+.venv/Scripts/python -m pytest tests/test_price_structure.py -v
+.venv/Scripts/python -m pytest tests/test_analyzer.py -v
+.venv/Scripts/python -m pytest tests/test_ranking.py -v
 
 # Run a single test by name
 .venv/Scripts/python -m pytest tests/test_hmm.py::TestRegimeInference::test_predict_returns_regime_result -v
@@ -656,65 +667,92 @@ py -3.12 -m venv .venv
 .venv/Scripts/python -m pytest -m "not integration" -v
 ```
 
-### Explore Script (Live Regime Detection)
+### CLI Commands (after pip install)
 
 ```bash
-# Default tickers: SPY, GLD, QQQ, TLT
-.venv/Scripts/python explore.py
+# Interactive regime exploration (default tickers: SPY, GLD, QQQ, TLT)
+analyzer-explore
+analyzer-explore --tickers AAPL MSFT AMZN
+analyzer-explore --tickers GLD
 
-# Custom tickers
-.venv/Scripts/python explore.py --tickers AAPL MSFT AMZN
-
-# Single ticker deep-dive
-.venv/Scripts/python explore.py --tickers GLD
+# Regime chart with price, volume, RSI, confidence panels (requires [plot])
+analyzer-plot
+analyzer-plot --tickers AAPL MSFT
+analyzer-plot --tickers GLD --save
 ```
 
-### Plot Regime Charts
+### Script Wrappers (no install required)
 
 ```bash
-# Default tickers: SPY, GLD, QQQ, TLT (requires: pip install -e ".[plot]")
+.venv/Scripts/python explore.py
+.venv/Scripts/python explore.py --tickers GLD
 .venv/Scripts/python plot_regime.py
-
-# Custom tickers
-.venv/Scripts/python plot_regime.py --tickers AAPL MSFT
-
-# Save to PNG instead of interactive window
 .venv/Scripts/python plot_regime.py --tickers GLD --save
 ```
 
 ### Quick Python Usage
 
 ```bash
-# Detect regime for a single ticker (auto-fetches OHLCV, caches to parquet)
+# Detect regime (via facade)
 .venv/Scripts/python -c "
-from market_analyzer.data.service import DataService
-from market_analyzer.service.regime_service import RegimeService
-svc = RegimeService(data_service=DataService())
-r = svc.detect('SPY')
+from market_analyzer import MarketAnalyzer, DataService
+ma = MarketAnalyzer(data_service=DataService())
+r = ma.regime.detect('SPY')
 print(f'{r.ticker}: R{r.regime} ({r.confidence:.0%})')
+"
+
+# Batch regime detection
+.venv/Scripts/python -c "
+from market_analyzer import MarketAnalyzer, DataService
+ma = MarketAnalyzer(data_service=DataService())
+for t, r in ma.regime.detect_batch(tickers=['SPY','GLD','QQQ','TLT']).items():
+    print(f'{t}: R{r.regime} ({r.confidence:.0%})')
+"
+
+# Technical snapshot
+.venv/Scripts/python -c "
+from market_analyzer import MarketAnalyzer, DataService
+ma = MarketAnalyzer(data_service=DataService())
+t = ma.technicals.snapshot('SPY')
+print(f'RSI: {t.rsi.value:.1f}, ATR: {t.atr_pct:.2f}%')
+"
+
+# Levels with R:R
+.venv/Scripts/python -c "
+from market_analyzer import MarketAnalyzer, DataService
+ma = MarketAnalyzer(data_service=DataService())
+print(ma.levels.analyze('SPY').summary)
+"
+
+# Rank trades across tickers
+.venv/Scripts/python -c "
+from market_analyzer import MarketAnalyzer, DataService
+ma = MarketAnalyzer(data_service=DataService())
+result = ma.ranking.rank(['SPY', 'GLD', 'QQQ', 'TLT'])
+for e in result.top_trades[:5]:
+    print(f'#{e.rank} {e.ticker} {e.strategy_type} score={e.composite_score:.2f} {e.verdict}')
+"
+
+# Black swan alert
+.venv/Scripts/python -c "
+from market_analyzer import MarketAnalyzer, DataService
+ma = MarketAnalyzer(data_service=DataService())
+alert = ma.black_swan.alert()
+print(f'Alert: {alert.alert_level} (score={alert.composite_score:.2f})')
 "
 
 # Fetch OHLCV data only (cache-first)
 .venv/Scripts/python -c "
-from market_analyzer.data.service import DataService
+from market_analyzer import DataService
 df = DataService().get_ohlcv('GLD')
 print(df.tail())
 "
 
 # Check what's cached
 .venv/Scripts/python -c "
-from market_analyzer.data.service import DataService
+from market_analyzer import DataService
 for m in DataService().cache_status('SPY'):
     print(f'{m.data_type}: {m.first_date} → {m.last_date} ({m.row_count} rows)')
-"
-
-# Batch regime detection
-.venv/Scripts/python -c "
-from market_analyzer.data.service import DataService
-from market_analyzer.service.regime_service import RegimeService
-svc = RegimeService(data_service=DataService())
-for t, r in svc.detect_batch(tickers=['SPY','GLD','QQQ','TLT']).items():
-    print(f'{t}: R{r.regime} ({r.confidence:.0%})')
 "
 ```
 
@@ -726,14 +764,14 @@ ls ~/.market_analyzer/cache/ohlcv/
 
 # Invalidate cache for a ticker (forces re-fetch on next request)
 .venv/Scripts/python -c "
-from market_analyzer.data.service import DataService
+from market_analyzer import DataService
 DataService().invalidate_cache('SPY')
 print('Cache invalidated for SPY')
 "
 
 # Invalidate all cached data for a ticker
 .venv/Scripts/python -c "
-from market_analyzer.data.service import DataService
+from market_analyzer import DataService
 DataService().invalidate_cache('SPY', data_type=None)
 "
 ```

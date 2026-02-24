@@ -193,11 +193,90 @@ opportunity:
       3: 1.0
       4: 0.75
 
+levels:
+  confluence_proximity_pct: 0.5
+  min_stop_distance_pct: 0.3
+  max_stop_distance_pct: 5.0
+  atr_stop_buffer_multiple: 0.5
+  atr_fallback_multiple: 2.0
+  min_target_distance_pct: 0.5
+  min_risk_reward: 1.5
+  max_targets: 3
+  max_strength_denominator: 3.0
+  source_weights:
+    swing_support: 1.0
+    swing_resistance: 1.0
+    order_block_high: 0.9
+    order_block_low: 0.9
+    vcp_pivot: 0.85
+    sma_200: 0.8
+    sma_50: 0.7
+    fvg_high: 0.7
+    fvg_low: 0.7
+    sma_20: 0.5
+    ema_21: 0.5
+    bollinger_upper: 0.5
+    bollinger_middle: 0.5
+    bollinger_lower: 0.5
+    vwma_20: 0.5
+    ema_9: 0.4
+    orb_level: 0.6
+
 orb:
   opening_minutes: 30
   extensions: [1.0, 1.5, 2.0]
   market_open_hour: 9
   market_open_minute: 30
+
+ranking:
+  weights:
+    verdict: 0.25
+    confidence: 0.25
+    regime_alignment: 0.15
+    risk_reward: 0.15
+    technical_quality: 0.10
+    phase_alignment: 0.10
+  income_bias_boost: 0.05
+  macro_penalty_per_event: 0.02
+  macro_penalty_max: 0.10
+  earnings_penalty: 0.10
+  earnings_proximity_days: 3
+  risk_reward_excellent: 3.0
+  risk_reward_good: 2.0
+  risk_reward_fair: 1.0
+
+black_swan:
+  vix_warning: 20.0
+  vix_danger: 30.0
+  vix_critical: 40.0
+  term_structure_warning: 0.95
+  term_structure_danger: 1.05
+  term_structure_critical: 1.20
+  credit_warning_pct: -0.5
+  credit_danger_pct: -1.5
+  credit_critical_pct: -3.0
+  spy_warning_pct: -1.0
+  spy_danger_pct: -2.0
+  spy_critical_pct: -4.0
+  rv_iv_warning: 0.0
+  rv_iv_danger: 5.0
+  rv_iv_critical: 15.0
+  tlt_warning_pct: 1.0
+  tlt_danger_pct: 2.0
+  tlt_critical_pct: 3.0
+  em_warning_pct: -1.0
+  em_danger_pct: -3.0
+  em_critical_pct: -5.0
+  yield_curve_warning_bps: 50.0
+  yield_curve_danger_bps: 0.0
+  yield_curve_critical_bps: -25.0
+  put_call_warning: 0.80
+  put_call_danger: 1.00
+  put_call_critical: 1.30
+  alert_elevated: 0.25
+  alert_high: 0.50
+  alert_critical: 0.75
+  lookback_days: 20
 
 display:
   default_tickers: ["SPY", "GLD", "QQQ", "TLT"]

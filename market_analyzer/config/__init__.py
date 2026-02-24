@@ -246,11 +246,97 @@ class OpportunitySettings(BaseModel):
     momentum: MomentumSettings = Field(default_factory=MomentumSettings)
 
 
+class LevelsSettings(BaseModel):
+    confluence_proximity_pct: float = 0.5
+    min_stop_distance_pct: float = 0.3
+    max_stop_distance_pct: float = 5.0
+    atr_stop_buffer_multiple: float = 0.5
+    atr_fallback_multiple: float = 2.0
+    min_target_distance_pct: float = 0.5
+    min_risk_reward: float = 1.5
+    max_targets: int = 3
+    max_strength_denominator: float = 3.0
+    source_weights: dict[str, float] = Field(default_factory=lambda: {
+        "swing_support": 1.0,
+        "swing_resistance": 1.0,
+        "order_block_high": 0.9,
+        "order_block_low": 0.9,
+        "vcp_pivot": 0.85,
+        "sma_200": 0.8,
+        "sma_50": 0.7,
+        "fvg_high": 0.7,
+        "fvg_low": 0.7,
+        "sma_20": 0.5,
+        "ema_21": 0.5,
+        "bollinger_upper": 0.5,
+        "bollinger_middle": 0.5,
+        "bollinger_lower": 0.5,
+        "vwma_20": 0.5,
+        "ema_9": 0.4,
+        "orb_level": 0.6,
+    })
+
+
 class ORBSettings(BaseModel):
     opening_minutes: int = 30
     extensions: list[float] = Field(default_factory=lambda: [1.0, 1.5, 2.0])
     market_open_hour: int = 9
     market_open_minute: int = 30
+
+
+class RankingWeightsSettings(BaseModel):
+    verdict: float = 0.25
+    confidence: float = 0.25
+    regime_alignment: float = 0.15
+    risk_reward: float = 0.15
+    technical_quality: float = 0.10
+    phase_alignment: float = 0.10
+
+
+class RankingSettings(BaseModel):
+    weights: RankingWeightsSettings = Field(default_factory=RankingWeightsSettings)
+    income_bias_boost: float = 0.05
+    macro_penalty_per_event: float = 0.02
+    macro_penalty_max: float = 0.10
+    earnings_penalty: float = 0.10
+    earnings_proximity_days: int = 3
+    risk_reward_excellent: float = 3.0
+    risk_reward_good: float = 2.0
+    risk_reward_fair: float = 1.0
+
+
+class BlackSwanSettings(BaseModel):
+    vix_warning: float = 20.0
+    vix_danger: float = 30.0
+    vix_critical: float = 40.0
+    term_structure_warning: float = 0.95
+    term_structure_danger: float = 1.05
+    term_structure_critical: float = 1.20
+    credit_warning_pct: float = -0.5
+    credit_danger_pct: float = -1.5
+    credit_critical_pct: float = -3.0
+    spy_warning_pct: float = -1.0
+    spy_danger_pct: float = -2.0
+    spy_critical_pct: float = -4.0
+    rv_iv_warning: float = 0.0
+    rv_iv_danger: float = 5.0
+    rv_iv_critical: float = 15.0
+    tlt_warning_pct: float = 1.0
+    tlt_danger_pct: float = 2.0
+    tlt_critical_pct: float = 3.0
+    em_warning_pct: float = -1.0
+    em_danger_pct: float = -3.0
+    em_critical_pct: float = -5.0
+    yield_curve_warning_bps: float = 50.0
+    yield_curve_danger_bps: float = 0.0
+    yield_curve_critical_bps: float = -25.0
+    put_call_warning: float = 0.80
+    put_call_danger: float = 1.00
+    put_call_critical: float = 1.30
+    alert_elevated: float = 0.25
+    alert_high: float = 0.50
+    alert_critical: float = 0.75
+    lookback_days: int = 20
 
 
 class DisplaySettings(BaseModel):
@@ -273,7 +359,10 @@ class Settings(BaseModel):
     fundamentals: FundamentalsSettings = Field(default_factory=FundamentalsSettings)
     macro: MacroSettings = Field(default_factory=MacroSettings)
     opportunity: OpportunitySettings = Field(default_factory=OpportunitySettings)
+    levels: LevelsSettings = Field(default_factory=LevelsSettings)
     orb: ORBSettings = Field(default_factory=ORBSettings)
+    ranking: RankingSettings = Field(default_factory=RankingSettings)
+    black_swan: BlackSwanSettings = Field(default_factory=BlackSwanSettings)
     display: DisplaySettings = Field(default_factory=DisplaySettings)
 
 

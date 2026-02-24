@@ -6,8 +6,10 @@ dist/
 build/
 *.egg
 
-# Virtual environment
+# Virtual environments
 .venv/
+.venv_312/
+.venv_312_bak/
 
 # IDE
 .idea/
@@ -27,5 +29,10 @@ htmlcov/
 .DS_Store
 Thumbs.db
 
-# Cache and models (runtime artifacts)
+# Cache and models (runtime artifacts — stored in ~/.market_analyzer/)
+# Do NOT check in cached market data — it's large and changes daily
 *.joblib
+*.parquet
+
+# Workspace files
+*.code-workspace

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import timedelta
+
 import yfinance as yf
 import pandas as pd
 
@@ -28,10 +30,12 @@ class YFinanceProvider(DataProvider):
         and a DatetimeIndex sorted ascending. Raises DataFetchError on failure.
         """
         try:
+            # yfinance end_date is exclusive — add 1 day to include it
+            end = request.end_date + timedelta(days=1) if request.end_date else None
             df = yf.download(
                 request.ticker,
                 start=request.start_date,
-                end=request.end_date,
+                end=end,
                 progress=False,
                 auto_adjust=True,
             )

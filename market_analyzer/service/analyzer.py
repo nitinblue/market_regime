@@ -6,9 +6,12 @@ from typing import TYPE_CHECKING
 
 from market_analyzer.models.regime import RegimeConfig
 from market_analyzer.service.fundamental import FundamentalService
+from market_analyzer.service.levels import LevelsService
 from market_analyzer.service.macro import MacroService
 from market_analyzer.service.opportunity import OpportunityService
 from market_analyzer.service.phase import PhaseService
+from market_analyzer.service.black_swan import BlackSwanService
+from market_analyzer.service.ranking import TradeRankingService
 from market_analyzer.service.regime import RegimeService
 from market_analyzer.service.technical import TechnicalService
 
@@ -46,11 +49,23 @@ class MarketAnalyzer:
         )
         self.fundamentals = FundamentalService()
         self.macro = MacroService()
+        self.levels = LevelsService(
+            technical_service=self.technicals,
+            regime_service=self.regime,
+            data_service=data_service,
+        )
         self.opportunity = OpportunityService(
             regime_service=self.regime,
             technical_service=self.technicals,
             phase_service=self.phase,
             fundamental_service=self.fundamentals,
             macro_service=self.macro,
+            data_service=data_service,
+        )
+        self.black_swan = BlackSwanService(data_service=data_service)
+        self.ranking = TradeRankingService(
+            opportunity_service=self.opportunity,
+            levels_service=self.levels,
+            black_swan_service=self.black_swan,
             data_service=data_service,
         )

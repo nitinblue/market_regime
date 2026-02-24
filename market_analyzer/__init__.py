@@ -103,12 +103,12 @@ from market_analyzer.models.opportunity import (
     Verdict,
     ZeroDTEOpportunity,
 )
-from market_analyzer.opportunity.zero_dte import assess_zero_dte
-from market_analyzer.opportunity.leap import assess_leap
-from market_analyzer.opportunity.breakout import assess_breakout
-from market_analyzer.opportunity.momentum import assess_momentum
-from market_analyzer.opportunity.mean_reversion import assess_mean_reversion
-from market_analyzer.opportunity.earnings import assess_earnings_play
+from market_analyzer.opportunity.option_plays.zero_dte import assess_zero_dte
+from market_analyzer.opportunity.option_plays.leap import assess_leap
+from market_analyzer.opportunity.option_plays.earnings import assess_earnings_play
+from market_analyzer.opportunity.setups.breakout import assess_breakout
+from market_analyzer.opportunity.setups.momentum import assess_momentum
+from market_analyzer.opportunity.setups.mean_reversion import assess_mean_reversion
 
 # Black Swan / Tail-Risk
 from market_analyzer.models.black_swan import (

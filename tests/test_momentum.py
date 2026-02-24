@@ -48,7 +48,7 @@ from market_analyzer.models.technicals import (
     SupportResistance,
     TechnicalSnapshot,
 )
-from market_analyzer.opportunity.momentum import assess_momentum
+from market_analyzer.opportunity.setups.momentum import assess_momentum
 
 
 # --- Test helpers ---

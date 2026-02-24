@@ -68,7 +68,7 @@ class OpportunityService:
         as_of: date | None = None,
     ) -> ZeroDTEOpportunity:
         """Assess 0DTE opportunity for a single instrument."""
-        from market_analyzer.opportunity.zero_dte import assess_zero_dte as _assess
+        from market_analyzer.opportunity.option_plays.zero_dte import assess_zero_dte as _assess
 
         if self.regime_service is None or self.technical_service is None:
             raise ValueError("OpportunityService requires regime and technical services")
@@ -105,7 +105,7 @@ class OpportunityService:
         as_of: date | None = None,
     ) -> LEAPOpportunity:
         """Assess LEAP opportunity for a single instrument."""
-        from market_analyzer.opportunity.leap import assess_leap as _assess
+        from market_analyzer.opportunity.option_plays.leap import assess_leap as _assess
 
         if self.regime_service is None or self.technical_service is None:
             raise ValueError("OpportunityService requires regime and technical services")
@@ -136,7 +136,7 @@ class OpportunityService:
         as_of: date | None = None,
     ) -> BreakoutOpportunity:
         """Assess breakout opportunity for a single instrument."""
-        from market_analyzer.opportunity.breakout import assess_breakout as _assess
+        from market_analyzer.opportunity.setups.breakout import assess_breakout as _assess
 
         if self.regime_service is None or self.technical_service is None:
             raise ValueError("OpportunityService requires regime and technical services")
@@ -167,7 +167,7 @@ class OpportunityService:
         as_of: date | None = None,
     ) -> MomentumOpportunity:
         """Assess momentum opportunity for a single instrument."""
-        from market_analyzer.opportunity.momentum import assess_momentum as _assess
+        from market_analyzer.opportunity.setups.momentum import assess_momentum as _assess
 
         if self.regime_service is None or self.technical_service is None:
             raise ValueError("OpportunityService requires regime and technical services")

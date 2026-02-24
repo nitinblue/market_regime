@@ -6,7 +6,7 @@ import pytest
 
 from market_analyzer.models.opportunity import Verdict
 from market_analyzer.models.regime import RegimeID, RegimeResult, TrendDirection
-from market_analyzer.opportunity.mean_reversion import (
+from market_analyzer.opportunity.setups.mean_reversion import (
     MeanReversionOpportunity,
     assess_mean_reversion,
 )

@@ -183,6 +183,8 @@ data/service.py  (independently usable by cotrader)
 | `data/cache/` | Parquet read/write, freshness checks, delta-date computation. |
 | `data/providers/` | Network fetchers. Each provider implements the `DataProvider` ABC. |
 | `data/registry.py` | Maps (ticker, data_type) to the correct provider. |
+| `opportunity/setups/` | Price-based directional pattern detection (breakout, momentum, mean_reversion). |
+| `opportunity/option_plays/` | Horizon-specific option structure recommendations (zero_dte, leap, earnings). |
 
 ---
 
@@ -848,3 +850,4 @@ DataService().invalidate_cache('SPY', data_type=None)
 | 2026-02-21 | Label alignment via vol+trend axes | 2x2 sorting maps arbitrary HMM states to R1–R4 semantically |
 | 2026-02-21 | Expanded to canonical historical data service | market_analyzer owns all historical data for ecosystem; added DataService, parquet cache, three providers (yfinance, CBOE, TastyTrade); yfinance now required |
 | 2026-02-23 | Trading workflow restructure | Added 6 workflow services (context, instrument, screening, entry, strategy, exit), 5 new model files, multi-market config (US + India), interactive CLI (analyzer-cli), API.md. Additive — no existing files moved, all 580 tests pass. |
+| 2026-02-23 | Opportunity folder reorganized | Split opportunity/ into setups/ (breakout, momentum, mean_reversion) and option_plays/ (zero_dte, leap, earnings). Top-level __init__.py re-exports everything for backward compat. |

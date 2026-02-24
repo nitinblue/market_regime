@@ -53,7 +53,7 @@ from market_analyzer.models.technicals import (
     VCPData,
     VCPStage,
 )
-from market_analyzer.opportunity.breakout import assess_breakout
+from market_analyzer.opportunity.setups.breakout import assess_breakout
 
 
 # --- Test helpers ---

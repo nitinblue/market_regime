@@ -332,7 +332,7 @@ class RegimeService:
         Gathers regime, technicals, ORB, macro, and fundamentals, then
         delegates to the pure assessment function.
         """
-        from market_analyzer.opportunity.zero_dte import assess_zero_dte as _assess
+        from market_analyzer.opportunity.option_plays.zero_dte import assess_zero_dte as _assess
 
         df = self._get_ohlcv(ticker, ohlcv)
         regime = self.detect(ticker, df)
@@ -370,7 +370,7 @@ class RegimeService:
         Gathers regime, technicals, phase, macro, and fundamentals, then
         delegates to the pure assessment function.
         """
-        from market_analyzer.opportunity.leap import assess_leap as _assess
+        from market_analyzer.opportunity.option_plays.leap import assess_leap as _assess
 
         df = self._get_ohlcv(ticker, ohlcv)
         regime = self.detect(ticker, df)
@@ -405,7 +405,7 @@ class RegimeService:
         Gathers regime, technicals, phase, macro, and fundamentals, then
         delegates to the pure assessment function.
         """
-        from market_analyzer.opportunity.breakout import assess_breakout as _assess
+        from market_analyzer.opportunity.setups.breakout import assess_breakout as _assess
 
         df = self._get_ohlcv(ticker, ohlcv)
         regime = self.detect(ticker, df)
@@ -440,7 +440,7 @@ class RegimeService:
         Gathers regime, technicals, phase, macro, and fundamentals, then
         delegates to the pure assessment function.
         """
-        from market_analyzer.opportunity.momentum import assess_momentum as _assess
+        from market_analyzer.opportunity.setups.momentum import assess_momentum as _assess
 
         df = self._get_ohlcv(ticker, ohlcv)
         regime = self.detect(ticker, df)

@@ -257,11 +257,24 @@ l.summary           # str
 
 ### Opportunity Assessment — `ma.opportunity`
 
+Organized into two subpackages:
+
+**Setups** (price-based directional pattern detection):
 ```python
 bo = ma.opportunity.assess_breakout("SPY")   # BreakoutOpportunity
 mo = ma.opportunity.assess_momentum("SPY")   # MomentumOpportunity
+```
+
+**Option Plays** (horizon-specific option structure recommendations):
+```python
 lo = ma.opportunity.assess_leap("SPY")       # LEAPOpportunity
 zd = ma.opportunity.assess_zero_dte("SPY")   # ZeroDTEOpportunity
+```
+
+```
+opportunity/
+├── setups/          # breakout, momentum, mean_reversion
+└── option_plays/    # zero_dte, leap, earnings
 ```
 
 ### Trade Ranking — `ma.ranking`

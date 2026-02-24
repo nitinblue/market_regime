@@ -21,7 +21,7 @@ from market_analyzer.models.fundamentals import (
 )
 from market_analyzer.models.opportunity import Verdict
 from market_analyzer.models.regime import RegimeID, RegimeResult, TrendDirection
-from market_analyzer.opportunity.earnings import (
+from market_analyzer.opportunity.option_plays.earnings import (
     EarningsOpportunity,
     assess_earnings_play,
 )

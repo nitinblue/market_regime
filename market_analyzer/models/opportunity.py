@@ -227,3 +227,72 @@ class MomentumOpportunity(BaseModel):
     score: MomentumScore
     days_to_earnings: int | None
     summary: str
+
+
+# --- TradeSpec (actionable trade parameters) ---
+
+
+class LegSpec(BaseModel):
+    """A single option leg in a trade spec."""
+
+    role: str  # "short_put", "long_put", "short_call", "long_call", "short_straddle"
+    option_type: str  # "call" or "put"
+    strike: float  # Suggested strike price (snapped to tick)
+    strike_label: str  # Human-readable: "1.0 ATR OTM put" or "ATM call"
+    expiration: date
+    days_to_expiry: int
+    atm_iv_at_expiry: float  # IV at this expiration (from term structure)
+
+    @property
+    def short_code(self) -> str:
+        """Human-readable short code: 'SPY 580P 3/27'."""
+        p_or_c = "C" if self.option_type == "call" else "P"
+        strike_str = f"{self.strike:.0f}" if self.strike == int(self.strike) else f"{self.strike:.1f}"
+        return f"{strike_str}{p_or_c} {self.expiration.month}/{self.expiration.day}"
+
+    @property
+    def osi_symbol(self) -> str:
+        """OCC option symbol format: 'SPY   260327P00580000'.
+
+        Note: ticker must be set externally since LegSpec doesn't carry it.
+        Returns the date+type+strike portion only.
+        """
+        p_or_c = "C" if self.option_type == "call" else "P"
+        date_str = self.expiration.strftime("%y%m%d")
+        # OCC: strike * 1000, zero-padded to 8 digits
+        strike_int = int(self.strike * 1000)
+        return f"{date_str}{p_or_c}{strike_int:08d}"
+
+
+class TradeSpec(BaseModel):
+    """Actionable trade parameters — the 'what to actually trade' output."""
+
+    ticker: str  # Underlying symbol
+    legs: list[LegSpec]
+    underlying_price: float
+    target_dte: int  # Primary DTE target (e.g., 35)
+    target_expiration: date  # Best matching real expiration
+    # Calendar/diagonal only:
+    front_expiration: date | None = None
+    front_dte: int | None = None
+    back_expiration: date | None = None
+    back_dte: int | None = None
+    iv_at_front: float | None = None
+    iv_at_back: float | None = None
+    iv_differential_pct: float | None = None  # (front - back) / back * 100
+    # Sizing context:
+    wing_width_points: float | None = None  # IC/IFly: distance between short and long strike
+    max_risk_per_spread: str | None = None  # "wing_width * 100 - credit"
+    # Rationale:
+    spec_rationale: str  # Why these specific dates/strikes were chosen
+
+    @property
+    def leg_codes(self) -> list[str]:
+        """Human-readable short codes for each leg: ['SPY 580P 3/27', ...]."""
+        return [f"{self.ticker} {leg.short_code}" for leg in self.legs]
+
+    @property
+    def streamer_symbols(self) -> list[str]:
+        """Full OCC option symbols: ['SPY   260327P00580000', ...]."""
+        padded = f"{self.ticker:<6}"
+        return [f"{padded}{leg.osi_symbol}" for leg in self.legs]

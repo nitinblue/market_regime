@@ -10,6 +10,7 @@ from pydantic import BaseModel
 class DataType(StrEnum):
     OHLCV = "ohlcv"
     OPTIONS_IV = "options_iv"
+    OPTIONS_CHAIN = "options_chain"
     BROKER_HISTORY = "broker_history"
 
 

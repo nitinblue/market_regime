@@ -515,6 +515,228 @@ class AnalyzerCLI(cmd.Cmd):
         except Exception as exc:
             print(f"{_styled('ERROR:', 'red')} {exc}")
 
+    def do_vol(self, arg: str) -> None:
+        """Show volatility surface.\nUsage: vol SPY"""
+        tickers = self._parse_tickers(arg)
+        if not tickers:
+            print("Usage: vol TICKER")
+            return
+
+        try:
+            ma = self._get_ma()
+            ticker = tickers[0]
+            surf = ma.vol_surface.surface(ticker)
+
+            _print_header(f"{ticker} — Volatility Surface ({surf.as_of_date})")
+            print(f"\n  Underlying:  ${surf.underlying_price:.2f}")
+            print(f"  Front IV:    {surf.front_iv:.1%}")
+            print(f"  Back IV:     {surf.back_iv:.1%}")
+            print(f"  Term Slope:  {surf.term_slope:+.1%} ({'contango' if surf.is_contango else 'backwardation'})")
+            print(f"  Calendar Edge: {surf.calendar_edge_score:.2f}")
+            print(f"  Data Quality:  {surf.data_quality}")
+
+            if surf.term_structure:
+                print(f"\n  Term Structure:")
+                rows = []
+                for pt in surf.term_structure:
+                    rows.append({
+                        "Expiry": str(pt.expiration),
+                        "DTE": pt.days_to_expiry,
+                        "ATM IV": f"{pt.atm_iv:.1%}",
+                        "Strike": f"${pt.atm_strike:.0f}",
+                    })
+                print(tabulate(rows, headers="keys", tablefmt="simple", stralign="right"))
+
+            if surf.skew_by_expiry:
+                print(f"\n  Skew (front expiry):")
+                sk = surf.skew_by_expiry[0]
+                print(f"    ATM IV:     {sk.atm_iv:.1%}")
+                print(f"    OTM Put IV: {sk.otm_put_iv:.1%} (skew: +{sk.put_skew:.1%})")
+                print(f"    OTM Call IV:{sk.otm_call_iv:.1%} (skew: +{sk.call_skew:.1%})")
+                print(f"    Skew Ratio: {sk.skew_ratio:.1f}")
+
+            if surf.best_calendar_expiries:
+                f, b = surf.best_calendar_expiries
+                print(f"\n  Best Calendar: sell {f} / buy {b} (diff: {surf.iv_differential_pct:+.1f}%)")
+
+            print(f"\n  {_styled(surf.summary, 'dim')}")
+
+        except Exception as exc:
+            print(f"{_styled('ERROR:', 'red')} {exc}")
+
+    def do_setup(self, arg: str) -> None:
+        """Assess price-based setups (breakout, momentum, mean_reversion, orb).\nUsage: setup SPY [type]\n  Types: breakout, momentum, mr (mean_reversion), orb, all (default)\n  Note: ORB requires intraday data; shows NO_GO without it."""
+        parts = arg.strip().split()
+        if not parts:
+            print("Usage: setup TICKER [type]")
+            print("  Types: breakout, momentum, mr (mean_reversion), orb, all (default)")
+            return
+
+        ticker = parts[0].upper()
+        setup_type = parts[1].lower() if len(parts) > 1 else "all"
+
+        type_map = {
+            "breakout": ["breakout"],
+            "momentum": ["momentum"],
+            "mr": ["mean_reversion"],
+            "mean_reversion": ["mean_reversion"],
+            "orb": ["orb"],
+            "all": ["breakout", "momentum", "mean_reversion", "orb"],
+        }
+        setups = type_map.get(setup_type)
+        if setups is None:
+            print(f"Unknown setup: '{setup_type}'. Use: breakout, momentum, mr, orb, all")
+            return
+
+        try:
+            ma = self._get_ma()
+            _print_header(f"{ticker} — Setup Assessment")
+
+            for s in setups:
+                try:
+                    if s == "breakout":
+                        result = ma.opportunity.assess_breakout(ticker)
+                    elif s == "momentum":
+                        result = ma.opportunity.assess_momentum(ticker)
+                    elif s == "mean_reversion":
+                        from market_analyzer.opportunity.setups.mean_reversion import assess_mean_reversion as _mr
+                        regime = ma.regime.detect(ticker)
+                        technicals = ma.technicals.snapshot(ticker)
+                        result = _mr(ticker, regime, technicals)
+                    elif s == "orb":
+                        # ORB without intraday data → NO_GO (expected)
+                        from market_analyzer.opportunity.setups.orb import assess_orb as _orb_assess
+                        regime = ma.regime.detect(ticker)
+                        technicals = ma.technicals.snapshot(ticker)
+                        result = _orb_assess(ticker, regime, technicals, orb=None)
+                    else:
+                        continue
+
+                    verdict_color = {"go": "green", "caution": "yellow", "no_go": "red"}
+                    v = result.verdict if isinstance(result.verdict, str) else result.verdict.value
+                    v_color = verdict_color.get(v, "")
+                    v_text = _styled(v.upper(), v_color)
+
+                    name = s.replace("_", " ").title()
+                    conf = result.confidence if hasattr(result, "confidence") else 0
+                    print(f"\n  {_styled(name, 'bold')}: {v_text} ({conf:.0%})")
+
+                    if hasattr(result, "hard_stops") and result.hard_stops:
+                        for hs in result.hard_stops[:2]:
+                            print(f"    {_styled('STOP:', 'red')} {hs.description}")
+
+                    if hasattr(result, "direction") and result.direction != "neutral":
+                        print(f"    Direction: {result.direction.title()}")
+                    if hasattr(result, "strategy") and isinstance(result.strategy, str):
+                        print(f"    Strategy:  {result.strategy.replace('_', ' ').title()}")
+
+                    # ORB-specific fields
+                    if hasattr(result, "orb_status") and result.orb_status != "none":
+                        print(f"    ORB Status: {result.orb_status}")
+                        print(f"    Range:     {result.range_pct:.2f}%")
+                        if result.range_vs_daily_atr_pct is not None:
+                            print(f"    Range/ATR: {result.range_vs_daily_atr_pct:.0f}%")
+
+                    if hasattr(result, "signals"):
+                        for sig in result.signals[:3]:
+                            icon = _styled("+", "green") if sig.favorable else _styled("-", "red")
+                            desc = sig.description if isinstance(sig.description, str) else str(sig.description)
+                            print(f"    {icon} {desc[:70]}")
+
+                    print(f"    {_styled(result.summary, 'dim')}")
+
+                except Exception as exc:
+                    print(f"\n  {s.replace('_', ' ').title()}: {_styled(str(exc), 'red')}")
+
+        except Exception as exc:
+            print(f"{_styled('ERROR:', 'red')} {exc}")
+
+    def do_opportunity(self, arg: str) -> None:
+        """Assess option play opportunities.\nUsage: opportunity SPY [play]\n  Plays: ic, ifly, calendar, diagonal, ratio, zero_dte, leap, all\n  Default: all"""
+        parts = arg.strip().split()
+        if not parts:
+            print("Usage: opportunity TICKER [play]")
+            print("  Plays: ic (iron condor), ifly (iron butterfly), calendar, diagonal,")
+            print("         ratio (ratio spread), zero_dte, leap, all (default)")
+            return
+
+        ticker = parts[0].upper()
+        play = parts[1].lower() if len(parts) > 1 else "all"
+
+        play_map = {
+            "ic": ["iron_condor"],
+            "iron_condor": ["iron_condor"],
+            "ifly": ["iron_butterfly"],
+            "iron_butterfly": ["iron_butterfly"],
+            "calendar": ["calendar"],
+            "cal": ["calendar"],
+            "diagonal": ["diagonal"],
+            "diag": ["diagonal"],
+            "ratio": ["ratio_spread"],
+            "ratio_spread": ["ratio_spread"],
+            "zero_dte": ["zero_dte"],
+            "0dte": ["zero_dte"],
+            "leap": ["leap"],
+            "all": ["iron_condor", "iron_butterfly", "calendar", "diagonal", "ratio_spread"],
+        }
+        plays = play_map.get(play)
+        if plays is None:
+            print(f"Unknown play: '{play}'. Use: ic, ifly, calendar, diagonal, ratio, zero_dte, leap, all")
+            return
+
+        try:
+            ma = self._get_ma()
+            _print_header(f"{ticker} — Option Play Assessment")
+
+            for p in plays:
+                try:
+                    method = getattr(ma.opportunity, f"assess_{p}")
+                    result = method(ticker)
+
+                    verdict_color = {"go": "green", "caution": "yellow", "no_go": "red"}
+                    v_color = verdict_color.get(result.verdict.value, "")
+                    v_text = _styled(result.verdict.value.upper(), v_color)
+
+                    name = p.replace("_", " ").title()
+                    print(f"\n  {_styled(name, 'bold')}: {v_text} ({result.confidence:.0%})")
+
+                    if result.hard_stops:
+                        for hs in result.hard_stops[:2]:
+                            print(f"    {_styled('STOP:', 'red')} {hs.description}")
+
+                    if hasattr(result, "strategy") and result.verdict != "no_go":
+                        print(f"    Strategy:  {result.strategy.name}")
+                        print(f"    Structure: {result.strategy.structure[:80]}")
+                        if result.strategy.risk_notes:
+                            print(f"    Risk:      {result.strategy.risk_notes[0]}")
+
+                    # Iron condor specific
+                    if hasattr(result, "wing_width_suggestion") and result.verdict != "no_go":
+                        print(f"    Wings:     {result.wing_width_suggestion}")
+
+                    # Trade spec (actionable parameters)
+                    if hasattr(result, "trade_spec") and result.trade_spec is not None:
+                        ts = result.trade_spec
+                        print(f"    Expiry:    {ts.target_expiration} ({ts.target_dte}d)")
+                        if ts.front_expiration and ts.back_expiration:
+                            print(f"    Front:     {ts.front_expiration} ({ts.front_dte}d, IV {ts.iv_at_front:.1%})")
+                            print(f"    Back:      {ts.back_expiration} ({ts.back_dte}d, IV {ts.iv_at_back:.1%})")
+                        if ts.wing_width_points:
+                            print(f"    Wing Width: ${ts.wing_width_points:.0f}")
+                        print(f"    Legs:")
+                        for code in ts.leg_codes:
+                            print(f"      {code}")
+
+                    # Ratio spread specific
+                    if hasattr(result, "margin_warning") and result.margin_warning:
+                        print(f"    {_styled('MARGIN:', 'yellow')} {result.margin_warning}")
+
+                except Exception as exc:
+                    print(f"\n  {p.replace('_', ' ').title()}: {_styled(str(exc), 'red')}")
+
+        except Exception as exc:
+            print(f"{_styled('ERROR:', 'red')} {exc}")
+
     def do_quit(self, arg: str) -> bool:
         """Exit the REPL."""
         print("Goodbye.")

@@ -192,6 +192,69 @@ opportunity:
       2: 0.6
       3: 1.0
       4: 0.75
+  calendar:
+    r4_confidence_threshold: 0.70
+    earnings_blackout_days: 5
+    max_bid_ask_spread_pct: 2.0
+    atm_iv_high: 0.25
+    atm_iv_moderate: 0.15
+    go_threshold: 0.55
+    caution_threshold: 0.35
+    regime_multipliers:
+      1: 1.0
+      2: 0.90
+      3: 0.65
+      4: 0.3
+  diagonal:
+    r4_confidence_threshold: 0.70
+    earnings_blackout_days: 5
+    max_skew_ratio: 4.0
+    go_threshold: 0.55
+    caution_threshold: 0.35
+    regime_multipliers:
+      1: 0.80
+      2: 0.55
+      3: 1.0
+      4: 0.3
+  iron_condor:
+    r4_confidence_threshold: 0.70
+    r3_confidence_threshold: 0.75
+    earnings_blackout_days: 3
+    min_iv: 0.10
+    iv_excellent: 0.25
+    iv_good: 0.18
+    go_threshold: 0.55
+    caution_threshold: 0.35
+    regime_multipliers:
+      1: 1.0
+      2: 0.85
+      3: 0.4
+      4: 0.2
+  iron_butterfly:
+    trending_confidence_threshold: 0.70
+    earnings_blackout_days: 3
+    min_atm_iv: 0.15
+    atm_iv_excellent: 0.30
+    atm_iv_good: 0.20
+    go_threshold: 0.55
+    caution_threshold: 0.35
+    regime_multipliers:
+      1: 0.90
+      2: 1.0
+      3: 0.4
+      4: 0.2
+  ratio_spread:
+    r2_confidence_threshold: 0.75
+    earnings_blackout_days: 5
+    min_skew_pct: 0.02
+    margin_warning_threshold: "$50K+"
+    go_threshold: 0.55
+    caution_threshold: 0.35
+    regime_multipliers:
+      1: 1.0
+      2: 0.55
+      3: 0.85
+      4: 0.2
 
 levels:
   confluence_proximity_pct: 0.5

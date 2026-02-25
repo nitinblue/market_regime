@@ -2,9 +2,14 @@
 
 # Config
 from market_analyzer.config import (
+    CalendarSettings,
+    DiagonalSettings,
     ExitSettings,
+    IronButterflySettings,
+    IronCondorSettings,
     MarketDef,
     MarketSettings,
+    RatioSpreadSettings,
     ScreeningSettings,
     Settings,
     StrategySettings,
@@ -86,6 +91,15 @@ from market_analyzer.fundamentals.fetch import fetch_fundamentals
 from market_analyzer.models.macro import MacroCalendar, MacroEvent, MacroEventType
 from market_analyzer.macro.calendar import get_macro_calendar
 
+# Vol surface
+from market_analyzer.models.vol_surface import (
+    SkewSlice,
+    TermStructurePoint,
+    VolatilitySurface,
+)
+from market_analyzer.service.vol_surface import VolSurfaceService
+from market_analyzer.features.vol_surface import compute_vol_surface
+
 # Opportunity assessment
 from market_analyzer.models.levels import (
     LevelRole,
@@ -99,16 +113,36 @@ from market_analyzer.models.levels import (
 from market_analyzer.models.opportunity import (
     BreakoutOpportunity,
     LEAPOpportunity,
+    LegSpec,
     MomentumOpportunity,
+    TradeSpec,
     Verdict,
     ZeroDTEOpportunity,
 )
 from market_analyzer.opportunity.option_plays.zero_dte import assess_zero_dte
 from market_analyzer.opportunity.option_plays.leap import assess_leap
 from market_analyzer.opportunity.option_plays.earnings import assess_earnings_play
+from market_analyzer.opportunity.option_plays.calendar import (
+    CalendarOpportunity, CalendarStrategy, assess_calendar,
+)
+from market_analyzer.opportunity.option_plays.diagonal import (
+    DiagonalOpportunity, DiagonalStrategy, assess_diagonal,
+)
+from market_analyzer.opportunity.option_plays.iron_condor import (
+    IronCondorOpportunity, IronCondorStrategy, assess_iron_condor,
+)
+from market_analyzer.opportunity.option_plays.iron_butterfly import (
+    IronButterflyOpportunity, IronButterflyStrategy, assess_iron_butterfly,
+)
+from market_analyzer.opportunity.option_plays.ratio_spread import (
+    RatioSpreadOpportunity, RatioSpreadStrategy, assess_ratio_spread,
+)
 from market_analyzer.opportunity.setups.breakout import assess_breakout
 from market_analyzer.opportunity.setups.momentum import assess_momentum
 from market_analyzer.opportunity.setups.mean_reversion import assess_mean_reversion
+from market_analyzer.opportunity.setups.orb import (
+    ORBSetupOpportunity, ORBStrategy, assess_orb,
+)
 
 # Black Swan / Tail-Risk
 from market_analyzer.models.black_swan import (
@@ -234,18 +268,44 @@ __all__ = [
     "StopLoss",
     "Target",
     "TradeDirection",
+    # Vol surface
+    "VolSurfaceService",
+    "VolatilitySurface",
+    "TermStructurePoint",
+    "SkewSlice",
+    "compute_vol_surface",
     # Opportunity models
+    "LegSpec",
+    "TradeSpec",
     "Verdict",
     "ZeroDTEOpportunity",
     "LEAPOpportunity",
     "BreakoutOpportunity",
     "MomentumOpportunity",
+    "CalendarOpportunity",
+    "CalendarStrategy",
+    "DiagonalOpportunity",
+    "DiagonalStrategy",
+    "IronCondorOpportunity",
+    "IronCondorStrategy",
+    "IronButterflyOpportunity",
+    "IronButterflyStrategy",
+    "RatioSpreadOpportunity",
+    "RatioSpreadStrategy",
     "assess_zero_dte",
     "assess_leap",
     "assess_breakout",
     "assess_momentum",
     "assess_mean_reversion",
+    "assess_orb",
+    "ORBSetupOpportunity",
+    "ORBStrategy",
     "assess_earnings_play",
+    "assess_calendar",
+    "assess_diagonal",
+    "assess_iron_condor",
+    "assess_iron_butterfly",
+    "assess_ratio_spread",
     # Black Swan
     "AlertLevel",
     "BlackSwanAlert",

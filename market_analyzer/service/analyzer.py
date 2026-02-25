@@ -20,6 +20,7 @@ from market_analyzer.service.screening import ScreeningService
 from market_analyzer.service.entry import EntryService
 from market_analyzer.service.strategy import StrategyService
 from market_analyzer.service.exit import ExitService
+from market_analyzer.service.vol_surface import VolSurfaceService
 
 if TYPE_CHECKING:
     from market_analyzer.data.service import DataService
@@ -73,6 +74,7 @@ class MarketAnalyzer:
             regime_service=self.regime,
             data_service=data_service,
         )
+        self.vol_surface = VolSurfaceService(data_service=data_service)
         self.opportunity = OpportunityService(
             regime_service=self.regime,
             technical_service=self.technicals,
@@ -80,6 +82,7 @@ class MarketAnalyzer:
             fundamental_service=self.fundamentals,
             macro_service=self.macro,
             data_service=data_service,
+            vol_surface_service=self.vol_surface,
         )
         self.black_swan = BlackSwanService(data_service=data_service)
         self.ranking = TradeRankingService(

@@ -112,4 +112,5 @@ class TestProviderContract:
         assert provider.provider_type == ProviderType.YFINANCE
 
     def test_supported_data_types(self, provider: YFinanceProvider) -> None:
-        assert provider.supported_data_types == [DataType.OHLCV]
+        assert DataType.OHLCV in provider.supported_data_types
+        assert DataType.OPTIONS_CHAIN in provider.supported_data_types

@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from market_analyzer.data.cache.parquet_cache import ParquetCache
+from market_analyzer.data.cache.parquet_cache import ParquetCache, _SNAPSHOT_DATA_TYPES
 from market_analyzer.data.exceptions import DataFetchError
 from market_analyzer.data.providers.yfinance import YFinanceProvider
 from market_analyzer.data.registry import ProviderRegistry
@@ -38,12 +38,17 @@ class DataService:
     DEFAULT_LOOKBACK_DAYS = 730
 
     def get(self, request: DataRequest) -> tuple[pd.DataFrame, DataResult]:
-        """Get data (cache-first, delta-fetch if stale)."""
+        """Get data (cache-first, delta-fetch if stale).
+
+        Snapshot data types (e.g. OPTIONS_CHAIN) skip delta-fetch and date
+        filtering — they are fully refreshed when stale.
+        """
         provider = self._registry.resolve(request.ticker, request.data_type)
+        is_snapshot = request.data_type in _SNAPSHOT_DATA_TYPES
         end_date = request.end_date or date.today()
-        # Default to 2-year lookback if no start_date — ensures enough data for
-        # feature normalization (~40 days) and HMM training (~2 years)
-        if request.start_date is None:
+
+        # Default to 2-year lookback if no start_date (time-series only)
+        if not is_snapshot and request.start_date is None:
             request = DataRequest(
                 ticker=request.ticker,
                 data_type=request.data_type,
@@ -55,8 +60,11 @@ class DataService:
         cached_df = self._cache.read(request.ticker, request.data_type)
 
         if cached_df is not None and not self._cache.is_stale(request.ticker, request.data_type):
-            # Fresh cache — apply date filter and return
-            df = self._filter_dates(cached_df, request.start_date, end_date)
+            # Fresh cache
+            if is_snapshot:
+                df = cached_df
+            else:
+                df = self._filter_dates(cached_df, request.start_date, end_date)
             if df.empty:
                 raise DataFetchError(
                     str(provider.provider_type), request.ticker,
@@ -67,37 +75,39 @@ class DataService:
                 data_type=request.data_type,
                 provider=provider.provider_type,
                 from_cache=True,
-                date_range=(df.index[0].date(), df.index[-1].date()),
+                date_range=self._date_range(df, is_snapshot),
                 row_count=len(df),
             )
             return df, result
 
-        # Need to fetch — determine if delta or full
-        delta = self._cache.delta_dates(request.ticker, request.data_type, end_date)
+        # Need to fetch
+        if not is_snapshot:
+            # Time-series: try delta-fetch
+            delta = self._cache.delta_dates(request.ticker, request.data_type, end_date)
 
-        if cached_df is not None and delta is not None:
-            # Delta fetch — only missing dates
-            fetch_request = DataRequest(
-                ticker=request.ticker,
-                data_type=request.data_type,
-                start_date=delta[0],
-                end_date=delta[1],
-            )
-            new_df = provider.fetch(fetch_request)
-            # Merge: concat + deduplicate + sort
-            merged = pd.concat([cached_df, new_df])
-            merged = merged[~merged.index.duplicated(keep="last")]
-            merged.sort_index(inplace=True)
-            df = merged
+            if cached_df is not None and delta is not None:
+                fetch_request = DataRequest(
+                    ticker=request.ticker,
+                    data_type=request.data_type,
+                    start_date=delta[0],
+                    end_date=delta[1],
+                )
+                new_df = provider.fetch(fetch_request)
+                merged = pd.concat([cached_df, new_df])
+                merged = merged[~merged.index.duplicated(keep="last")]
+                merged.sort_index(inplace=True)
+                df = merged
+            else:
+                fetch_request = DataRequest(
+                    ticker=request.ticker,
+                    data_type=request.data_type,
+                    start_date=request.start_date,
+                    end_date=end_date,
+                )
+                df = provider.fetch(fetch_request)
         else:
-            # Full fetch
-            fetch_request = DataRequest(
-                ticker=request.ticker,
-                data_type=request.data_type,
-                start_date=request.start_date,
-                end_date=end_date,
-            )
-            df = provider.fetch(fetch_request)
+            # Snapshot: always full refresh
+            df = provider.fetch(request)
 
         if df.empty:
             raise DataFetchError(
@@ -110,16 +120,19 @@ class DataService:
             ticker=request.ticker.upper(),
             data_type=request.data_type,
             provider=provider.provider_type,
-            first_date=df.index[0].date(),
-            last_date=df.index[-1].date(),
+            first_date=self._first_date(df, is_snapshot),
+            last_date=self._last_date(df, is_snapshot),
             last_fetched=datetime.now(),
             row_count=len(df),
             file_path=self._cache._parquet_path(request.ticker, request.data_type),
         )
         self._cache.write(request.ticker, request.data_type, df, meta)
 
-        # Apply date filter for the returned result
-        filtered = self._filter_dates(df, request.start_date, end_date)
+        # Apply date filter (time-series only)
+        if is_snapshot:
+            filtered = df
+        else:
+            filtered = self._filter_dates(df, request.start_date, end_date)
         if filtered.empty:
             raise DataFetchError(
                 str(provider.provider_type), request.ticker,
@@ -130,7 +143,7 @@ class DataService:
             data_type=request.data_type,
             provider=provider.provider_type,
             from_cache=False,
-            date_range=(filtered.index[0].date(), filtered.index[-1].date()),
+            date_range=self._date_range(filtered, is_snapshot),
             row_count=len(filtered),
         )
         return filtered, result
@@ -148,6 +161,12 @@ class DataService:
             start_date=start_date,
             end_date=end_date,
         )
+        df, _ = self.get(request)
+        return df
+
+    def get_options_chain(self, ticker: str) -> pd.DataFrame:
+        """Convenience: fetch full options chain for a ticker (snapshot, cache-first)."""
+        request = DataRequest(ticker=ticker, data_type=DataType.OPTIONS_CHAIN)
         df, _ = self.get(request)
         return df
 
@@ -189,8 +208,28 @@ class DataService:
     def _filter_dates(
         df: pd.DataFrame, start_date: date | None, end_date: date
     ) -> pd.DataFrame:
-        """Filter DataFrame to requested date range."""
+        """Filter DataFrame to requested date range (time-series only)."""
         if start_date is not None:
             df = df[df.index >= pd.Timestamp(start_date)]
         df = df[df.index <= pd.Timestamp(end_date)]
         return df
+
+    @staticmethod
+    def _date_range(df: pd.DataFrame, is_snapshot: bool) -> tuple[date, date]:
+        """Extract (first, last) date from DataFrame."""
+        if is_snapshot:
+            today = date.today()
+            return (today, today)
+        return (df.index[0].date(), df.index[-1].date())
+
+    @staticmethod
+    def _first_date(df: pd.DataFrame, is_snapshot: bool) -> date:
+        if is_snapshot:
+            return date.today()
+        return df.index[0].date()
+
+    @staticmethod
+    def _last_date(df: pd.DataFrame, is_snapshot: bool) -> date:
+        if is_snapshot:
+            return date.today()
+        return df.index[-1].date()

@@ -239,11 +239,79 @@ class MomentumSettings(BaseModel):
     })
 
 
+class CalendarSettings(BaseModel):
+    r4_confidence_threshold: float = 0.70
+    earnings_blackout_days: int = 5
+    max_bid_ask_spread_pct: float = 2.0
+    atm_iv_high: float = 0.25
+    atm_iv_moderate: float = 0.15
+    go_threshold: float = 0.55
+    caution_threshold: float = 0.35
+    regime_multipliers: dict[int, float] = Field(default_factory=lambda: {
+        1: 1.0, 2: 0.90, 3: 0.65, 4: 0.3,
+    })
+
+
+class DiagonalSettings(BaseModel):
+    r4_confidence_threshold: float = 0.70
+    earnings_blackout_days: int = 5
+    max_skew_ratio: float = 4.0
+    go_threshold: float = 0.55
+    caution_threshold: float = 0.35
+    regime_multipliers: dict[int, float] = Field(default_factory=lambda: {
+        1: 0.80, 2: 0.55, 3: 1.0, 4: 0.3,
+    })
+
+
+class IronButterflySettings(BaseModel):
+    trending_confidence_threshold: float = 0.70
+    earnings_blackout_days: int = 3
+    min_atm_iv: float = 0.15
+    atm_iv_excellent: float = 0.30
+    atm_iv_good: float = 0.20
+    go_threshold: float = 0.55
+    caution_threshold: float = 0.35
+    regime_multipliers: dict[int, float] = Field(default_factory=lambda: {
+        1: 0.90, 2: 1.0, 3: 0.4, 4: 0.2,
+    })
+
+
+class IronCondorSettings(BaseModel):
+    r4_confidence_threshold: float = 0.70
+    r3_confidence_threshold: float = 0.75
+    earnings_blackout_days: int = 3
+    min_iv: float = 0.10
+    iv_excellent: float = 0.25
+    iv_good: float = 0.18
+    go_threshold: float = 0.55
+    caution_threshold: float = 0.35
+    regime_multipliers: dict[int, float] = Field(default_factory=lambda: {
+        1: 1.0, 2: 0.85, 3: 0.4, 4: 0.2,
+    })
+
+
+class RatioSpreadSettings(BaseModel):
+    r2_confidence_threshold: float = 0.75
+    earnings_blackout_days: int = 5
+    min_skew_pct: float = 0.02
+    margin_warning_threshold: str = "$50K+"
+    go_threshold: float = 0.55
+    caution_threshold: float = 0.35
+    regime_multipliers: dict[int, float] = Field(default_factory=lambda: {
+        1: 1.0, 2: 0.55, 3: 0.85, 4: 0.2,
+    })
+
+
 class OpportunitySettings(BaseModel):
     zero_dte: ZeroDTESettings = Field(default_factory=ZeroDTESettings)
     leap: LEAPSettings = Field(default_factory=LEAPSettings)
     breakout: BreakoutSettings = Field(default_factory=BreakoutSettings)
     momentum: MomentumSettings = Field(default_factory=MomentumSettings)
+    calendar: CalendarSettings = Field(default_factory=CalendarSettings)
+    diagonal: DiagonalSettings = Field(default_factory=DiagonalSettings)
+    iron_condor: IronCondorSettings = Field(default_factory=IronCondorSettings)
+    iron_butterfly: IronButterflySettings = Field(default_factory=IronButterflySettings)
+    ratio_spread: RatioSpreadSettings = Field(default_factory=RatioSpreadSettings)
 
 
 class LevelsSettings(BaseModel):

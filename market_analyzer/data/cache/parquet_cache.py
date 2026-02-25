@@ -14,6 +14,12 @@ from market_analyzer.data.exceptions import CacheError
 from market_analyzer.models.data import CacheMeta, DataType
 
 
+# Data types that are snapshot-based (not time-series).
+# These use full-refresh caching (no delta-fetch) with shorter staleness.
+_SNAPSHOT_DATA_TYPES: set[DataType] = {DataType.OPTIONS_CHAIN}
+_SNAPSHOT_STALENESS_HOURS: float = 4.0
+
+
 class ParquetCache:
     """Manages parquet files in ~/.market_analyzer/cache/."""
 
@@ -108,6 +114,9 @@ class ParquetCache:
     def is_stale(self, ticker: str, data_type: DataType) -> bool:
         """Check if cached data is stale (older than staleness threshold).
 
+        Snapshot data types (e.g. OPTIONS_CHAIN) use a shorter staleness window
+        (4 hours) and skip weekend awareness (options data changes with market).
+
         Weekend awareness: if today is Sat/Sun and last cached date is
         the most recent Friday, data is considered fresh.
         """
@@ -117,6 +126,10 @@ class ParquetCache:
 
         now = datetime.now()
         age = now - meta.last_fetched
+
+        # Snapshot data types use shorter staleness, no weekend logic
+        if data_type in _SNAPSHOT_DATA_TYPES:
+            return age >= timedelta(hours=_SNAPSHOT_STALENESS_HOURS)
 
         # If within staleness window, it's fresh
         if age < timedelta(hours=self.staleness_hours):

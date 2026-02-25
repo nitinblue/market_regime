@@ -13,7 +13,7 @@ from market_analyzer.models.data import DataRequest, DataType, ProviderType
 
 
 class YFinanceProvider(DataProvider):
-    """Fetches OHLCV data from Yahoo Finance."""
+    """Fetches OHLCV and options chain data from Yahoo Finance."""
 
     @property
     def provider_type(self) -> ProviderType:
@@ -21,9 +21,62 @@ class YFinanceProvider(DataProvider):
 
     @property
     def supported_data_types(self) -> list[DataType]:
-        return [DataType.OHLCV]
+        return [DataType.OHLCV, DataType.OPTIONS_CHAIN]
 
     def fetch(self, request: DataRequest) -> pd.DataFrame:
+        if request.data_type == DataType.OPTIONS_CHAIN:
+            return self._fetch_options_chain(request)
+        return self._fetch_ohlcv(request)
+
+    def _fetch_options_chain(self, request: DataRequest) -> pd.DataFrame:
+        """Fetch full options chain from yfinance.
+
+        Returns DataFrame with columns:
+            expiration(date), strike(float), option_type(str: "call"/"put"),
+            bid(float), ask(float), last_price(float), volume(int),
+            open_interest(int), implied_volatility(float), in_the_money(bool)
+        Index: RangeIndex (one row per strike × option_type × expiration).
+        """
+        try:
+            ticker_obj = yf.Ticker(request.ticker)
+            expirations = ticker_obj.options
+        except Exception as e:
+            raise DataFetchError("yfinance", request.ticker, f"Failed to get options expirations: {e}") from e
+
+        if not expirations:
+            raise DataFetchError("yfinance", request.ticker, "No options expirations available")
+
+        all_rows: list[pd.DataFrame] = []
+        for exp_str in expirations:
+            try:
+                chain = ticker_obj.option_chain(exp_str)
+            except Exception:
+                continue  # Skip expirations that fail
+
+            for opt_type, df_raw in [("call", chain.calls), ("put", chain.puts)]:
+                if df_raw is None or df_raw.empty:
+                    continue
+                chunk = pd.DataFrame({
+                    "expiration": pd.Timestamp(exp_str).date(),
+                    "strike": df_raw["strike"].values,
+                    "option_type": opt_type,
+                    "bid": df_raw["bid"].values,
+                    "ask": df_raw["ask"].values,
+                    "last_price": df_raw["lastPrice"].values,
+                    "volume": df_raw["volume"].fillna(0).astype(int).values,
+                    "open_interest": df_raw["openInterest"].fillna(0).astype(int).values,
+                    "implied_volatility": df_raw["impliedVolatility"].values,
+                    "in_the_money": df_raw["inTheMoney"].values,
+                })
+                all_rows.append(chunk)
+
+        if not all_rows:
+            raise DataFetchError("yfinance", request.ticker, "No options chain data returned")
+
+        result = pd.concat(all_rows, ignore_index=True)
+        return result
+
+    def _fetch_ohlcv(self, request: DataRequest) -> pd.DataFrame:
         """Fetch OHLCV data from yfinance.
 
         Returns DataFrame with columns [Open, High, Low, Close, Volume]

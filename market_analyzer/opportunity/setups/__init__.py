@@ -3,9 +3,11 @@
 from market_analyzer.opportunity.setups.breakout import assess_breakout
 from market_analyzer.opportunity.setups.momentum import assess_momentum
 from market_analyzer.opportunity.setups.mean_reversion import assess_mean_reversion
+from market_analyzer.opportunity.setups.orb import assess_orb
 
 __all__ = [
     "assess_breakout",
     "assess_momentum",
     "assess_mean_reversion",
+    "assess_orb",
 ]

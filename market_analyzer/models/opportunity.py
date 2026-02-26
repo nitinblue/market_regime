@@ -28,6 +28,7 @@ class StructureType(StrEnum):
     RATIO_SPREAD = "ratio_spread"
     STRADDLE = "straddle"
     STRANGLE = "strangle"
+    DOUBLE_CALENDAR = "double_calendar"
     LONG_OPTION = "long_option"  # Single long call/put
     PMCC = "pmcc"
 
@@ -79,6 +80,7 @@ _PROFILES: dict[str, tuple[str, str, RiskProfile, str]] = {
     "iron_man":        ("\\__/",  "neutral",  RiskProfile.DEFINED,   "4-leg neutral debit · defined risk"),
     "iron_butterfly":  ("/\\",    "neutral",  RiskProfile.DEFINED,   "4-leg ATM straddle + wings · defined risk"),
     "calendar":        ("/\\",    "neutral",  RiskProfile.DEFINED,   "2-leg time spread · defined risk"),
+    "double_calendar": ("/‾‾\\",  "neutral",  RiskProfile.DEFINED,   "4-leg double time spread · defined risk"),
     "diagonal":        ("_/\\",   "neutral",  RiskProfile.DEFINED,   "2-leg time+strike spread · defined risk"),
     "pmcc":            ("_/\\",   "bullish",  RiskProfile.DEFINED,   "poor man's covered call · defined risk"),
 }

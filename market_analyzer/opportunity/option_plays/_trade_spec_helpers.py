@@ -278,6 +278,51 @@ def build_calendar_legs(
     return legs
 
 
+def build_double_calendar_legs(
+    price: float,
+    front_exp: TermStructurePoint,
+    back_exp: TermStructurePoint,
+    atr: float | None = None,
+) -> list[LegSpec]:
+    """Build double calendar: put calendar below + call calendar above = 4 legs.
+
+    Put calendar at put_strike (below price), call calendar at call_strike (above price).
+    Each calendar: sell front, buy back at the same strike.
+    """
+    offset = 0.5 * atr if atr else price * 0.02
+    call_strike = snap_strike(price + offset, price)
+    put_strike = snap_strike(price - offset, price)
+
+    return [
+        # Put calendar (below price)
+        LegSpec(
+            role="short_front_put", action=LegAction.SELL_TO_OPEN, option_type="put", strike=put_strike,
+            strike_label="sell front put (below)",
+            expiration=front_exp.expiration, days_to_expiry=front_exp.days_to_expiry,
+            atm_iv_at_expiry=front_exp.atm_iv,
+        ),
+        LegSpec(
+            role="long_back_put", action=LegAction.BUY_TO_OPEN, option_type="put", strike=put_strike,
+            strike_label="buy back put (below)",
+            expiration=back_exp.expiration, days_to_expiry=back_exp.days_to_expiry,
+            atm_iv_at_expiry=back_exp.atm_iv,
+        ),
+        # Call calendar (above price)
+        LegSpec(
+            role="short_front_call", action=LegAction.SELL_TO_OPEN, option_type="call", strike=call_strike,
+            strike_label="sell front call (above)",
+            expiration=front_exp.expiration, days_to_expiry=front_exp.days_to_expiry,
+            atm_iv_at_expiry=front_exp.atm_iv,
+        ),
+        LegSpec(
+            role="long_back_call", action=LegAction.BUY_TO_OPEN, option_type="call", strike=call_strike,
+            strike_label="buy back call (above)",
+            expiration=back_exp.expiration, days_to_expiry=back_exp.days_to_expiry,
+            atm_iv_at_expiry=back_exp.atm_iv,
+        ),
+    ]
+
+
 def build_diagonal_legs(
     price: float,
     front_exp: TermStructurePoint,
@@ -512,7 +557,20 @@ def build_dual_expiry_trade_spec(
 
     iv_diff = (front_pt.atm_iv - back_pt.atm_iv) / back_pt.atm_iv * 100 if back_pt.atm_iv > 0 else 0.0
 
-    if structure_type == "calendar":
+    if structure_type == "calendar" and strategy_type == "double_calendar":
+        legs = build_double_calendar_legs(price, front_pt, back_pt, atr)
+        rationale = (
+            f"Double calendar: put cal + call cal bracketing price. "
+            f"Front {front_pt.expiration} ({front_pt.days_to_expiry}d, IV {front_pt.atm_iv:.1%}) / "
+            f"Back {back_pt.expiration} ({back_pt.days_to_expiry}d, IV {back_pt.atm_iv:.1%}). "
+            f"IV diff: {iv_diff:+.1f}%."
+        )
+        st = StructureType.DOUBLE_CALENDAR
+        exit_dte = max(front_pt.days_to_expiry - 7, 0)
+        exit_notes = ["Close before front leg expiry to avoid assignment risk",
+                      "Roll front legs on 25% profit",
+                      "Close if underlying moves beyond either strike"]
+    elif structure_type == "calendar":
         legs = build_calendar_legs(price, front_pt, back_pt, strategy_type, atr)
         rationale = (
             f"Front {front_pt.expiration} ({front_pt.days_to_expiry}d, IV {front_pt.atm_iv:.1%}) / "

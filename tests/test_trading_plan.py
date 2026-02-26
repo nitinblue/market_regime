@@ -44,9 +44,11 @@ from market_analyzer.models.trading_plan import (
 )
 from market_analyzer.models.ranking import StrategyType
 from market_analyzer.opportunity.option_plays._trade_spec_helpers import (
+    build_double_calendar_legs,
     compute_max_entry_price,
     estimate_trade_price,
 )
+from market_analyzer.models.vol_surface import TermStructurePoint
 
 
 # ===== Phase 1: Expiry Calendar =====
@@ -835,7 +837,66 @@ class TestStructureProfile:
             p = get_structure_profile(st, side, "bullish")
             assert p.payoff_graph != "???", f"No profile for {st}"
 
+    def test_double_calendar(self):
+        from market_analyzer.models.opportunity import (
+            RiskProfile, StructureType, get_structure_profile,
+        )
+        p = get_structure_profile(StructureType.DOUBLE_CALENDAR)
+        assert p.bias == "neutral"
+        assert p.risk_profile == RiskProfile.DEFINED
+        assert "4-leg" in p.label
+
     def test_exports(self):
         from market_analyzer import RiskProfile, StructureProfile, get_structure_profile
         assert RiskProfile.DEFINED == "defined"
         assert RiskProfile.UNDEFINED == "undefined"
+
+
+# ===== Double Calendar Legs =====
+
+
+def _make_term_pt(dte: int, iv: float = 0.25) -> TermStructurePoint:
+    return TermStructurePoint(
+        expiration=date(2026, 3, 27) + timedelta(days=dte - 30),
+        days_to_expiry=dte,
+        atm_iv=iv,
+        atm_strike=600.0,
+        put_skew=0.0,
+        call_skew=0.0,
+    )
+
+
+class TestBuildDoubleCalendarLegs:
+    def test_returns_4_legs(self):
+        legs = build_double_calendar_legs(600.0, _make_term_pt(25), _make_term_pt(55), atr=10.0)
+        assert len(legs) == 4
+
+    def test_strikes_bracket_price(self):
+        price = 600.0
+        legs = build_double_calendar_legs(price, _make_term_pt(25), _make_term_pt(55), atr=10.0)
+        strikes = {leg.strike for leg in legs}
+        assert len(strikes) == 2  # Two distinct strikes
+        assert min(strikes) < price
+        assert max(strikes) > price
+
+    def test_has_puts_and_calls(self):
+        legs = build_double_calendar_legs(600.0, _make_term_pt(25), _make_term_pt(55), atr=10.0)
+        types = [leg.option_type for leg in legs]
+        assert types.count("put") == 2
+        assert types.count("call") == 2
+
+    def test_front_sold_back_bought(self):
+        front = _make_term_pt(25)
+        back = _make_term_pt(55)
+        legs = build_double_calendar_legs(600.0, front, back, atr=10.0)
+        for leg in legs:
+            if leg.days_to_expiry == front.days_to_expiry:
+                assert leg.action == LegAction.SELL_TO_OPEN
+            else:
+                assert leg.action == LegAction.BUY_TO_OPEN
+
+    def test_fallback_offset_without_atr(self):
+        legs = build_double_calendar_legs(600.0, _make_term_pt(25), _make_term_pt(55), atr=None)
+        assert len(legs) == 4
+        strikes = {leg.strike for leg in legs}
+        assert len(strikes) == 2

@@ -927,6 +927,158 @@ class AnalyzerCLI(cmd.Cmd):
         except Exception as exc:
             print(f"{_styled('ERROR:', 'red')} {exc}")
 
+    def do_adjust(self, arg: str) -> None:
+        """Analyze trade adjustments for a ticker.\nUsage: adjust TICKER"""
+        tickers = self._parse_tickers(arg)
+        if not tickers:
+            print("Usage: adjust TICKER")
+            return
+        ticker = tickers[0]
+
+        try:
+            ma = self._get_ma()
+            regime = ma.regime.detect(ticker)
+            tech = ma.technicals.snapshot(ticker)
+            price = tech.current_price
+            atr = tech.atr
+
+            # Build a representative IC trade for analysis
+            from market_analyzer.models.opportunity import LegAction, LegSpec, OrderSide, StructureType, TradeSpec
+            from market_analyzer.opportunity.option_plays._trade_spec_helpers import (
+                build_iron_condor_legs,
+                find_best_expiration,
+            )
+
+            vol_surface = None
+            try:
+                vol_surface = ma.vol_surface.get(ticker)
+            except Exception:
+                pass
+
+            # Try to build from vol surface, fallback to synthetic
+            exp_pt = None
+            if vol_surface and vol_surface.term_structure:
+                exp_pt = find_best_expiration(vol_surface.term_structure, 30, 45)
+
+            if exp_pt:
+                legs, wing_width = build_iron_condor_legs(
+                    price, atr, regime.regime, exp_pt.expiration,
+                    exp_pt.days_to_expiry, exp_pt.atm_iv,
+                )
+                trade = TradeSpec(
+                    ticker=ticker, legs=legs, underlying_price=price,
+                    target_dte=exp_pt.days_to_expiry, target_expiration=exp_pt.expiration,
+                    wing_width_points=wing_width,
+                    spec_rationale="Representative IC for adjustment analysis",
+                    structure_type=StructureType.IRON_CONDOR,
+                    order_side=OrderSide.CREDIT,
+                    profit_target_pct=0.50, stop_loss_pct=2.0, exit_dte=21,
+                )
+            else:
+                # Synthetic fallback
+                from datetime import timedelta
+                from market_analyzer.opportunity.option_plays._trade_spec_helpers import (
+                    compute_otm_strike, snap_strike,
+                )
+                dte = 30
+                exp = date.today() + timedelta(days=dte)
+                short_put = compute_otm_strike(price, atr, 1.0, "put", price)
+                short_call = compute_otm_strike(price, atr, 1.0, "call", price)
+                long_put = snap_strike(short_put - atr * 0.5, price)
+                long_call = snap_strike(short_call + atr * 0.5, price)
+                ww = short_put - long_put
+
+                def _leg(role, action, otype, strike):
+                    return LegSpec(
+                        role=role, action=action, option_type=otype, strike=strike,
+                        strike_label=f"{strike:.0f} {otype}",
+                        expiration=exp, days_to_expiry=dte, atm_iv_at_expiry=0.25,
+                    )
+
+                trade = TradeSpec(
+                    ticker=ticker,
+                    legs=[
+                        _leg("short_put", LegAction.SELL_TO_OPEN, "put", short_put),
+                        _leg("long_put", LegAction.BUY_TO_OPEN, "put", long_put),
+                        _leg("short_call", LegAction.SELL_TO_OPEN, "call", short_call),
+                        _leg("long_call", LegAction.BUY_TO_OPEN, "call", long_call),
+                    ],
+                    underlying_price=price, target_dte=dte, target_expiration=exp,
+                    wing_width_points=ww,
+                    spec_rationale="Synthetic IC for adjustment analysis",
+                    structure_type=StructureType.IRON_CONDOR,
+                    order_side=OrderSide.CREDIT,
+                    profit_target_pct=0.50, stop_loss_pct=2.0, exit_dte=21,
+                )
+
+            result = ma.adjustment.analyze(trade, regime, tech, vol_surface)
+
+            # Display
+            _print_header(f"{ticker} — Trade Adjustment Analysis")
+
+            # Position summary
+            short_puts = [l for l in trade.legs
+                          if l.option_type == "put" and l.action == LegAction.SELL_TO_OPEN]
+            short_calls = [l for l in trade.legs
+                           if l.option_type == "call" and l.action == LegAction.SELL_TO_OPEN]
+            long_puts = [l for l in trade.legs
+                         if l.option_type == "put" and l.action == LegAction.BUY_TO_OPEN]
+            long_calls = [l for l in trade.legs
+                          if l.option_type == "call" and l.action == LegAction.BUY_TO_OPEN]
+
+            legs_desc = ""
+            if short_puts and long_puts and short_calls and long_calls:
+                sp = max(l.strike for l in short_puts)
+                lp = min(l.strike for l in long_puts)
+                sc = min(l.strike for l in short_calls)
+                lc = max(l.strike for l in long_calls)
+                legs_desc = f"{lp:.0f}P/{sp:.0f}P — {sc:.0f}C/{lc:.0f}C"
+
+            profile = _profile_tag(trade.structure_type, trade.order_side)
+            print(f"\n  Position: Iron Condor  {legs_desc}  {result.remaining_dte} DTE  {profile}")
+
+            status_style = {
+                "safe": "green", "tested": "yellow", "breached": "red", "max_loss": "red",
+            }.get(result.position_status, "")
+            tested_str = (
+                f" ({result.tested_side} side)"
+                if result.tested_side != "none" else ""
+            )
+            print(f"  Status: {_styled(result.position_status.upper(), status_style)}{tested_str}  |  "
+                  f"Price: ${result.current_price:.0f}", end="")
+            if result.distance_to_short_put_pct is not None:
+                print(f"  |  Short put: {result.distance_to_short_put_pct:+.1f}%", end="")
+            if result.distance_to_short_call_pct is not None:
+                print(f"  |  Short call: {result.distance_to_short_call_pct:+.1f}%", end="")
+            print()
+            print(f"  P&L: ${result.pnl_estimate:+.2f}  |  Regime: R{result.regime_id}")
+
+            # Adjustments
+            print()
+            for i, adj in enumerate(result.adjustments, 1):
+                type_label = adj.adjustment_type.value.upper().replace("_", " ")
+                print(f"  #{i}  {_styled(type_label, 'bold')} — {adj.rationale}")
+                cost_str = f"${adj.estimated_cost:+.2f}" if adj.estimated_cost != 0 else "$0"
+                risk_str = f"${adj.risk_change:+.0f}" if adj.risk_change != 0 else "unchanged"
+                eff_str = f"{adj.efficiency:.2f}" if adj.efficiency is not None else ("∞" if adj.estimated_cost <= 0 and adj.risk_change < 0 else "—")
+                urgency_style = {"immediate": "red", "soon": "yellow", "monitor": "dim"}.get(adj.urgency, "")
+                print(f"      Cost: {cost_str}  |  Risk: {risk_str}  |  "
+                      f"Efficiency: {eff_str}  |  "
+                      f"Urgency: {_styled(adj.urgency, urgency_style)}")
+                if adj.description and adj.description != adj.rationale:
+                    print(f"      {_styled(adj.description, 'dim')}")
+                # Warn on poor cost/risk ratio for paid adjustments
+                if adj.estimated_cost > 0 and adj.risk_change < 0:
+                    ratio = abs(adj.risk_change) / adj.estimated_cost if adj.estimated_cost > 0 else 0
+                    if ratio < 1.0:
+                        print(f"      {_styled(f'⚠ POOR — paying ${adj.estimated_cost:.2f} to reduce ${abs(adj.risk_change):.0f} risk', 'yellow')}")
+                print()
+
+            print(f"  {_styled(result.recommendation, 'bold')}")
+
+        except Exception as exc:
+            print(f"{_styled('ERROR:', 'red')} {exc}")
+
     def do_quit(self, arg: str) -> bool:
         """Exit the REPL."""
         print("Goodbye.")
@@ -947,7 +1099,20 @@ class AnalyzerCLI(cmd.Cmd):
         pass
 
 
+def _ensure_utf8_stdout() -> None:
+    """Reconfigure stdout to UTF-8 on Windows to handle Unicode payoff graphs."""
+    import io
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    elif hasattr(sys.stdout, "buffer"):
+        sys.stdout = io.TextIOWrapper(
+            sys.stdout.buffer, encoding="utf-8", errors="replace",
+        )
+
+
 def main() -> None:
+    _ensure_utf8_stdout()
+
     parser = argparse.ArgumentParser(description="Interactive market analyzer REPL")
     parser.add_argument(
         "--market",

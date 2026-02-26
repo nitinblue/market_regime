@@ -51,6 +51,13 @@ from market_analyzer.models.strategy import (
     PositionSize,
     StrategyParameters,
 )
+from market_analyzer.models.adjustment import (
+    AdjustmentAnalysis,
+    AdjustmentOption,
+    AdjustmentType,
+    PositionStatus,
+    TestedSide,
+)
 from market_analyzer.models.exit_plan import (
     AdjustmentTrigger,
     AdjustmentTriggerType,
@@ -79,6 +86,7 @@ from market_analyzer.service.screening import ScreeningService, ScreenCandidate,
 from market_analyzer.service.entry import EntryService
 from market_analyzer.service.strategy import StrategyService
 from market_analyzer.service.exit import ExitService
+from market_analyzer.service.adjustment import AdjustmentService
 
 # Phase detection
 from market_analyzer.phases.detector import PhaseDetector
@@ -216,6 +224,7 @@ __all__ = [
     "EntryService",
     "StrategyService",
     "ExitService",
+    "AdjustmentService",
     # Regime models
     "RegimeID",
     "RegimeResult",
@@ -265,6 +274,12 @@ __all__ = [
     "OptionStructure",
     "StrategyParameters",
     "PositionSize",
+    # Adjustment models (new)
+    "AdjustmentAnalysis",
+    "AdjustmentOption",
+    "AdjustmentType",
+    "PositionStatus",
+    "TestedSide",
     # Exit models (new)
     "ExitPlan",
     "ExitTarget",

@@ -21,6 +21,7 @@ from market_analyzer.service.entry import EntryService
 from market_analyzer.service.strategy import StrategyService
 from market_analyzer.service.exit import ExitService
 from market_analyzer.service.vol_surface import VolSurfaceService
+from market_analyzer.service.adjustment import AdjustmentService
 from market_analyzer.service.trading_plan import TradingPlanService
 
 if TYPE_CHECKING:
@@ -125,4 +126,5 @@ class MarketAnalyzer:
             levels_service=self.levels,
             regime_service=self.regime,
         )
+        self.adjustment = AdjustmentService()
         self.plan = TradingPlanService(analyzer=self)

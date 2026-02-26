@@ -23,6 +23,7 @@ if TYPE_CHECKING:
     from market_analyzer.models.phase import PhaseResult
     from market_analyzer.models.regime import RegimeResult
     from market_analyzer.models.technicals import TechnicalSnapshot
+    from market_analyzer.models.vol_surface import VolatilitySurface
 
 
 def assess_momentum(
@@ -32,6 +33,7 @@ def assess_momentum(
     phase: PhaseResult,
     macro: MacroCalendar,
     fundamentals: FundamentalsSnapshot | None = None,
+    vol_surface: VolatilitySurface | None = None,
     as_of: date | None = None,
 ) -> MomentumOpportunity:
     """Assess momentum opportunity for a single instrument.
@@ -82,6 +84,15 @@ def assess_momentum(
         regime, technicals, phase, verdict, momentum_dir, cfg,
     )
 
+    # --- Trade spec ---
+    trade_spec = None
+    if verdict != Verdict.NO_GO and momentum_strategy != MomentumStrategy.NO_TRADE:
+        from market_analyzer.opportunity.option_plays._trade_spec_helpers import build_setup_trade_spec
+        trade_spec = build_setup_trade_spec(
+            ticker, technicals.current_price, technicals.atr,
+            momentum_dir.value, int(regime.regime), vol_surface,
+        )
+
     # --- Summary ---
     summary = _build_summary(
         ticker, verdict, confidence, momentum_strategy, hard_stops,
@@ -105,6 +116,7 @@ def assess_momentum(
         phase_confidence=round(phase.confidence, 2),
         score=score,
         days_to_earnings=days_to_earnings,
+        trade_spec=trade_spec,
         summary=summary,
     )
 

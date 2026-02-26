@@ -20,9 +20,17 @@ from market_analyzer.models.opportunity import (
     BreakoutOpportunity,
     LEAPOpportunity,
     MomentumOpportunity,
+    TradeSpec,
     Verdict,
     ZeroDTEOpportunity,
 )
+from market_analyzer.opportunity.option_plays.iron_condor import IronCondorOpportunity
+from market_analyzer.opportunity.option_plays.iron_butterfly import IronButterflyOpportunity
+from market_analyzer.opportunity.option_plays.calendar import CalendarOpportunity
+from market_analyzer.opportunity.option_plays.diagonal import DiagonalOpportunity
+from market_analyzer.opportunity.option_plays.ratio_spread import RatioSpreadOpportunity
+from market_analyzer.opportunity.option_plays.earnings import EarningsOpportunity
+from market_analyzer.opportunity.setups.mean_reversion import MeanReversionOpportunity
 from market_analyzer.models.ranking import (
     RankedEntry,
     RankingFeedback,
@@ -40,7 +48,10 @@ logger = logging.getLogger(__name__)
 
 # Type alias for any opportunity result
 OpportunityResult = Union[
-    ZeroDTEOpportunity, LEAPOpportunity, BreakoutOpportunity, MomentumOpportunity
+    ZeroDTEOpportunity, LEAPOpportunity, BreakoutOpportunity, MomentumOpportunity,
+    IronCondorOpportunity, IronButterflyOpportunity, CalendarOpportunity,
+    DiagonalOpportunity, RatioSpreadOpportunity, EarningsOpportunity,
+    MeanReversionOpportunity,
 ]
 
 # Map StrategyType -> OpportunityService method name
@@ -49,6 +60,13 @@ _ASSESS_METHODS: dict[StrategyType, str] = {
     StrategyType.LEAP: "assess_leap",
     StrategyType.BREAKOUT: "assess_breakout",
     StrategyType.MOMENTUM: "assess_momentum",
+    StrategyType.IRON_CONDOR: "assess_iron_condor",
+    StrategyType.IRON_BUTTERFLY: "assess_iron_butterfly",
+    StrategyType.CALENDAR: "assess_calendar",
+    StrategyType.DIAGONAL: "assess_diagonal",
+    StrategyType.RATIO_SPREAD: "assess_ratio_spread",
+    StrategyType.EARNINGS: "assess_earnings",
+    StrategyType.MEAN_REVERSION: "assess_mean_reversion",
 }
 
 
@@ -63,7 +81,7 @@ def _extract_phase_id(result: OpportunityResult) -> int:
 
 
 def _extract_days_to_earnings(result: OpportunityResult) -> int | None:
-    return result.days_to_earnings
+    return getattr(result, "days_to_earnings", None)
 
 
 def _extract_strategy_name(result: OpportunityResult) -> str:
@@ -76,6 +94,18 @@ def _extract_strategy_name(result: OpportunityResult) -> str:
         return result.breakout_strategy.value
     elif isinstance(result, MomentumOpportunity):
         return result.momentum_strategy.value
+    elif isinstance(result, IronCondorOpportunity):
+        return result.iron_condor_strategy
+    elif isinstance(result, IronButterflyOpportunity):
+        return result.iron_butterfly_strategy
+    elif isinstance(result, CalendarOpportunity):
+        return result.calendar_strategy
+    elif isinstance(result, DiagonalOpportunity):
+        return result.diagonal_strategy
+    elif isinstance(result, RatioSpreadOpportunity):
+        return result.ratio_strategy
+    elif isinstance(result, (EarningsOpportunity, MeanReversionOpportunity)):
+        return str(result.strategy)
     return "unknown"
 
 
@@ -86,6 +116,42 @@ def _extract_macro_events_7d(result: OpportunityResult) -> int:
     elif isinstance(result, LEAPOpportunity):
         return result.macro_events_next_30_days  # best proxy
     return 0
+
+
+def _extract_direction(result: OpportunityResult) -> str:
+    """Extract direction from heterogeneous result types."""
+    # Types with StrategyRecommendation object
+    if hasattr(result, "strategy") and hasattr(result.strategy, "direction"):
+        return result.strategy.direction
+    # Diagonal uses trend_direction
+    if hasattr(result, "trend_direction"):
+        return result.trend_direction
+    # Earnings, MeanReversion, RatioSpread have direction directly
+    if hasattr(result, "direction"):
+        return result.direction
+    return "neutral"
+
+
+def _extract_rationale(result: OpportunityResult) -> str:
+    """Extract rationale from heterogeneous result types."""
+    if hasattr(result, "strategy") and hasattr(result.strategy, "rationale"):
+        return result.strategy.rationale
+    return getattr(result, "summary", "")
+
+
+def _extract_risk_notes(result: OpportunityResult) -> list[str]:
+    """Extract risk notes from heterogeneous result types."""
+    if hasattr(result, "strategy") and hasattr(result.strategy, "risk_notes"):
+        return result.strategy.risk_notes
+    notes: list[str] = []
+    if hasattr(result, "has_naked_leg") and result.has_naked_leg:
+        notes.append(getattr(result, "margin_warning", "Naked leg — margin required"))
+    return notes
+
+
+def _extract_trade_spec(result: OpportunityResult) -> TradeSpec | None:
+    """Extract trade_spec from any opportunity result."""
+    return getattr(result, "trade_spec", None)
 
 
 class TradeRankingService:
@@ -193,49 +259,50 @@ class TradeRankingService:
 
                 try:
                     result: OpportunityResult = assess_fn(ticker, as_of=as_of)
+
+                    regime_id = _extract_regime_id(result)
+                    phase_id = _extract_phase_id(result)
+                    days_to_earnings = _extract_days_to_earnings(result)
+
+                    # Get weights from provider
+                    weights = self.weight_provider.get_weights(ticker, strategy)
+
+                    # Compute score
+                    breakdown = compute_composite_score(
+                        verdict=result.verdict,
+                        confidence=result.confidence,
+                        regime_id=regime_id,
+                        phase_id=phase_id,
+                        strategy=strategy,
+                        technicals=technicals,
+                        levels=levels_result,
+                        black_swan_score=black_swan_score,
+                        events_next_7_days=macro_events_7d,
+                        days_to_earnings=days_to_earnings,
+                        weights=weights,
+                    )
+                    composite = composite_from_breakdown(breakdown, weights)
+
+                    entries.append(
+                        RankedEntry(
+                            rank=0,  # assigned after sorting
+                            ticker=ticker,
+                            strategy_type=strategy,
+                            verdict=result.verdict,
+                            composite_score=round(composite, 4),
+                            breakdown=breakdown,
+                            strategy_name=_extract_strategy_name(result),
+                            direction=_extract_direction(result),
+                            rationale=_extract_rationale(result),
+                            risk_notes=_extract_risk_notes(result),
+                            trade_spec=_extract_trade_spec(result),
+                        )
+                    )
                 except Exception:
                     logger.warning(
                         "Assessment failed for %s/%s", ticker, strategy, exc_info=True
                     )
                     continue
-
-                regime_id = _extract_regime_id(result)
-                phase_id = _extract_phase_id(result)
-                days_to_earnings = _extract_days_to_earnings(result)
-
-                # Get weights from provider
-                weights = self.weight_provider.get_weights(ticker, strategy)
-
-                # Compute score
-                breakdown = compute_composite_score(
-                    verdict=result.verdict,
-                    confidence=result.confidence,
-                    regime_id=regime_id,
-                    phase_id=phase_id,
-                    strategy=strategy,
-                    technicals=technicals,
-                    levels=levels_result,
-                    black_swan_score=black_swan_score,
-                    events_next_7_days=macro_events_7d,
-                    days_to_earnings=days_to_earnings,
-                    weights=weights,
-                )
-                composite = composite_from_breakdown(breakdown, weights)
-
-                entries.append(
-                    RankedEntry(
-                        rank=0,  # assigned after sorting
-                        ticker=ticker,
-                        strategy_type=strategy,
-                        verdict=result.verdict,
-                        composite_score=round(composite, 4),
-                        breakdown=breakdown,
-                        strategy_name=_extract_strategy_name(result),
-                        direction=result.strategy.direction,
-                        rationale=result.strategy.rationale,
-                        risk_notes=result.strategy.risk_notes,
-                    )
-                )
 
         # 3. Sort by composite_score descending, assign ranks
         entries.sort(key=lambda e: e.composite_score, reverse=True)

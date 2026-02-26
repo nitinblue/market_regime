@@ -7,7 +7,7 @@ from enum import StrEnum
 
 from pydantic import BaseModel
 
-from market_analyzer.models.opportunity import Verdict
+from market_analyzer.models.opportunity import TradeSpec, Verdict
 
 
 class StrategyType(StrEnum):
@@ -17,6 +17,13 @@ class StrategyType(StrEnum):
     LEAP = "leap"
     BREAKOUT = "breakout"
     MOMENTUM = "momentum"
+    IRON_CONDOR = "iron_condor"
+    IRON_BUTTERFLY = "iron_butterfly"
+    CALENDAR = "calendar"
+    DIAGONAL = "diagonal"
+    RATIO_SPREAD = "ratio_spread"
+    EARNINGS = "earnings"
+    MEAN_REVERSION = "mean_reversion"
 
 
 class ScoreBreakdown(BaseModel):
@@ -47,6 +54,7 @@ class RankedEntry(BaseModel):
     direction: str                 # "neutral", "bullish", "bearish"
     rationale: str                 # from StrategyRecommendation
     risk_notes: list[str]
+    trade_spec: TradeSpec | None = None
 
 
 class TradeRankingResult(BaseModel):

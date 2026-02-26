@@ -113,12 +113,19 @@ from market_analyzer.models.levels import (
 from market_analyzer.models.opportunity import (
     BreakoutOpportunity,
     LEAPOpportunity,
+    LegAction,
     LegSpec,
     MomentumOpportunity,
+    ORBDecision,
+    OrderSide,
+    StructureType,
     TradeSpec,
     Verdict,
     ZeroDTEOpportunity,
+    ZeroDTEStrategy,
 )
+from market_analyzer.opportunity.option_plays.earnings import EarningsOpportunity
+from market_analyzer.opportunity.setups.mean_reversion import MeanReversionOpportunity
 from market_analyzer.opportunity.option_plays.zero_dte import assess_zero_dte
 from market_analyzer.opportunity.option_plays.leap import assess_leap
 from market_analyzer.opportunity.option_plays.earnings import assess_earnings_play
@@ -275,10 +282,17 @@ __all__ = [
     "SkewSlice",
     "compute_vol_surface",
     # Opportunity models
+    "LegAction",
     "LegSpec",
+    "StructureType",
+    "OrderSide",
     "TradeSpec",
     "Verdict",
+    "EarningsOpportunity",
+    "MeanReversionOpportunity",
     "ZeroDTEOpportunity",
+    "ZeroDTEStrategy",
+    "ORBDecision",
     "LEAPOpportunity",
     "BreakoutOpportunity",
     "MomentumOpportunity",

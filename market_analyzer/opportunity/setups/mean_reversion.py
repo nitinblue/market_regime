@@ -3,13 +3,17 @@
 from __future__ import annotations
 
 from datetime import date
+from enum import StrEnum
 from typing import TYPE_CHECKING
+
+from pydantic import BaseModel
 
 from market_analyzer.config import get_settings
 from market_analyzer.models.opportunity import (
     HardStop,
     OpportunitySignal,
     StrategyRecommendation,
+    TradeSpec,
     Verdict,
 )
 from market_analyzer.models.regime import RegimeID
@@ -20,9 +24,10 @@ if TYPE_CHECKING:
     from market_analyzer.models.phase import PhaseResult
     from market_analyzer.models.regime import RegimeResult
     from market_analyzer.models.technicals import TechnicalSnapshot
+    from market_analyzer.models.vol_surface import VolatilitySurface
 
 
-class MeanReversionStrategy(str):
+class MeanReversionStrategy(StrEnum):
     """Strategy types for mean reversion plays."""
 
     OVERSOLD_BOUNCE = "oversold_bounce"
@@ -31,39 +36,22 @@ class MeanReversionStrategy(str):
     NO_TRADE = "no_trade"
 
 
-class MeanReversionOpportunity:
-    """Result container for mean reversion assessment.
+class MeanReversionOpportunity(BaseModel):
+    """Result container for mean reversion assessment."""
 
-    Uses simple attributes rather than Pydantic to stay lightweight.
-    """
-
-    def __init__(
-        self,
-        ticker: str,
-        as_of_date: date,
-        verdict: Verdict,
-        confidence: float,
-        strategy: str,
-        direction: str,
-        signals: list[OpportunitySignal],
-        hard_stops: list[HardStop],
-        rsi: float,
-        bollinger_pct_b: float,
-        regime_id: int,
-        summary: str,
-    ):
-        self.ticker = ticker
-        self.as_of_date = as_of_date
-        self.verdict = verdict
-        self.confidence = confidence
-        self.strategy = strategy
-        self.direction = direction
-        self.signals = signals
-        self.hard_stops = hard_stops
-        self.rsi = rsi
-        self.bollinger_pct_b = bollinger_pct_b
-        self.regime_id = regime_id
-        self.summary = summary
+    ticker: str
+    as_of_date: date
+    verdict: Verdict
+    confidence: float
+    strategy: str
+    direction: str
+    signals: list[OpportunitySignal]
+    hard_stops: list[HardStop]
+    rsi: float
+    bollinger_pct_b: float
+    regime_id: int
+    trade_spec: TradeSpec | None = None
+    summary: str
 
 
 def assess_mean_reversion(
@@ -73,6 +61,7 @@ def assess_mean_reversion(
     phase: PhaseResult | None = None,
     macro: MacroCalendar | None = None,
     fundamentals: FundamentalsSnapshot | None = None,
+    vol_surface: VolatilitySurface | None = None,
     as_of: date | None = None,
 ) -> MeanReversionOpportunity:
     """Assess mean reversion opportunity for a single instrument.
@@ -201,6 +190,15 @@ def assess_mean_reversion(
     else:
         verdict = Verdict.NO_GO
 
+    # --- Trade spec ---
+    trade_spec = None
+    if verdict != Verdict.NO_GO and strategy != MeanReversionStrategy.NO_TRADE:
+        from market_analyzer.opportunity.option_plays._trade_spec_helpers import build_setup_trade_spec
+        trade_spec = build_setup_trade_spec(
+            ticker, technicals.current_price, technicals.atr,
+            direction, int(regime.regime), vol_surface,
+        )
+
     summary_parts = [f"{verdict.upper()}: {ticker}"]
     if signals:
         summary_parts.append(signals[0].description)
@@ -218,5 +216,6 @@ def assess_mean_reversion(
         rsi=rsi,
         bollinger_pct_b=bb_pct_b,
         regime_id=int(regime.regime),
+        trade_spec=trade_spec,
         summary=" | ".join(summary_parts),
     )

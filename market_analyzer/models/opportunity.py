@@ -8,6 +8,37 @@ from enum import StrEnum
 from pydantic import BaseModel
 
 
+class LegAction(StrEnum):
+    """Buy or sell action for an option leg."""
+
+    BUY_TO_OPEN = "BTO"
+    SELL_TO_OPEN = "STO"
+
+
+class StructureType(StrEnum):
+    """Option structure types — tells cotrader what order structure to build."""
+
+    IRON_CONDOR = "iron_condor"
+    IRON_MAN = "iron_man"  # Inverse/long iron condor
+    IRON_BUTTERFLY = "iron_butterfly"
+    CREDIT_SPREAD = "credit_spread"
+    DEBIT_SPREAD = "debit_spread"
+    CALENDAR = "calendar"
+    DIAGONAL = "diagonal"
+    RATIO_SPREAD = "ratio_spread"
+    STRADDLE = "straddle"
+    STRANGLE = "strangle"
+    LONG_OPTION = "long_option"  # Single long call/put
+    PMCC = "pmcc"
+
+
+class OrderSide(StrEnum):
+    """Net order side — credit (receive premium) or debit (pay premium)."""
+
+    CREDIT = "credit"
+    DEBIT = "debit"
+
+
 class Verdict(StrEnum):
     """Go/no-go verdict for an opportunity assessment."""
 
@@ -47,10 +78,23 @@ class StrategyRecommendation(BaseModel):
 
 class ZeroDTEStrategy(StrEnum):
     IRON_CONDOR = "iron_condor"
+    IRON_MAN = "iron_man"  # Inverse/long iron condor — debit, profits from big moves
     CREDIT_SPREAD = "credit_spread"
     STRADDLE_STRANGLE = "straddle_strangle"
     DIRECTIONAL_SPREAD = "directional_spread"
     NO_TRADE = "no_trade"
+
+
+class ORBDecision(BaseModel):
+    """ORB-based decision context for 0DTE strategies."""
+
+    status: str  # ORBStatus value
+    range_high: float
+    range_low: float
+    range_pct: float
+    direction: str  # "bullish", "bearish", "neutral"
+    decision: str  # Human-readable ORB-based decision rationale
+    key_levels: dict[str, float]  # {"T1_long": 605.5, "T1_short": 595.2, "vwap": 600.1, ...}
 
 
 class ZeroDTEOpportunity(BaseModel):
@@ -68,8 +112,10 @@ class ZeroDTEOpportunity(BaseModel):
     regime_confidence: float
     atr_pct: float
     orb_status: str | None
+    orb_decision: ORBDecision | None = None
     has_macro_event_today: bool
     days_to_earnings: int | None
+    trade_spec: TradeSpec | None = None
     summary: str
 
 
@@ -117,6 +163,7 @@ class LEAPOpportunity(BaseModel):
     fundamental_score: FundamentalScore
     days_to_earnings: int | None
     macro_events_next_30_days: int
+    trade_spec: TradeSpec | None = None
     summary: str
 
 
@@ -173,6 +220,7 @@ class BreakoutOpportunity(BaseModel):
     setup: BreakoutSetup
     pivot_price: float | None
     days_to_earnings: int | None
+    trade_spec: TradeSpec | None = None
     summary: str
 
 
@@ -226,6 +274,7 @@ class MomentumOpportunity(BaseModel):
     phase_confidence: float
     score: MomentumScore
     days_to_earnings: int | None
+    trade_spec: TradeSpec | None = None
     summary: str
 
 
@@ -236,6 +285,8 @@ class LegSpec(BaseModel):
     """A single option leg in a trade spec."""
 
     role: str  # "short_put", "long_put", "short_call", "long_call", "short_straddle"
+    action: LegAction  # BTO or STO
+    quantity: int = 1  # default 1, ratio spreads use 2
     option_type: str  # "call" or "put"
     strike: float  # Suggested strike price (snapped to tick)
     strike_label: str  # Human-readable: "1.0 ATR OTM put" or "ATM call"
@@ -245,10 +296,11 @@ class LegSpec(BaseModel):
 
     @property
     def short_code(self) -> str:
-        """Human-readable short code: 'SPY 580P 3/27'."""
+        """Parseable short code: 'STO 1x 580P 3/27/26'."""
         p_or_c = "C" if self.option_type == "call" else "P"
         strike_str = f"{self.strike:.0f}" if self.strike == int(self.strike) else f"{self.strike:.1f}"
-        return f"{strike_str}{p_or_c} {self.expiration.month}/{self.expiration.day}"
+        yy = self.expiration.strftime("%y")
+        return f"{self.action.value} {self.quantity}x {strike_str}{p_or_c} {self.expiration.month}/{self.expiration.day}/{yy}"
 
     @property
     def osi_symbol(self) -> str:
@@ -265,7 +317,18 @@ class LegSpec(BaseModel):
 
 
 class TradeSpec(BaseModel):
-    """Actionable trade parameters — the 'what to actually trade' output."""
+    """Actionable trade parameters — the 'what to actually trade' output.
+
+    Cotrader contract:
+      1. Read ``structure_type`` + ``order_side`` to identify the trade.
+      2. Read ``legs`` / ``order_data`` to build the multi-leg order.
+      3. After fill, apply exit rules using ``profit_target_pct``,
+         ``stop_loss_pct``, and ``exit_dte`` with the actual credit/debit.
+
+    ``stop_loss_pct`` semantics depend on ``order_side``:
+      - credit: multiple of credit received (2.0 → close when loss = 2× credit)
+      - debit: fraction of debit paid to lose (0.50 → close at 50% loss of debit)
+    """
 
     ticker: str  # Underlying symbol
     legs: list[LegSpec]
@@ -285,14 +348,66 @@ class TradeSpec(BaseModel):
     max_risk_per_spread: str | None = None  # "wing_width * 100 - credit"
     # Rationale:
     spec_rationale: str  # Why these specific dates/strikes were chosen
+    # Structure identification (cotrader reads these for order routing):
+    structure_type: str | None = None  # StructureType value
+    order_side: str | None = None  # OrderSide value: "credit" or "debit"
+    # Exit guidance (cotrader applies with actual fill data):
+    profit_target_pct: float | None = None  # Close at X% of max profit (0.50 = 50%)
+    stop_loss_pct: float | None = None  # Credit: X× credit; Debit: X fraction loss
+    exit_dte: int | None = None  # Close when DTE drops to this
+    max_profit_desc: str | None = None  # "Credit received" / "Spread width - debit"
+    max_loss_desc: str | None = None  # "Wing width - credit" / "UNLIMITED"
+    exit_notes: list[str] = []  # Structure-specific guidance
 
     @property
     def leg_codes(self) -> list[str]:
-        """Human-readable short codes for each leg: ['SPY 580P 3/27', ...]."""
-        return [f"{self.ticker} {leg.short_code}" for leg in self.legs]
+        """Parseable short codes: ['STO 1x SPY 580P 3/27/26', ...]."""
+        p = self.ticker
+        return [f"{leg.action.value} {leg.quantity}x {p} "
+                f"{'C' if leg.option_type == 'call' else 'P'}"
+                f"{f'{leg.strike:.0f}' if leg.strike == int(leg.strike) else f'{leg.strike:.1f}'} "
+                f"{leg.expiration.month}/{leg.expiration.day}/{leg.expiration.strftime('%y')}"
+                for leg in self.legs]
 
     @property
     def streamer_symbols(self) -> list[str]:
         """Full OCC option symbols: ['SPY   260327P00580000', ...]."""
         padded = f"{self.ticker:<6}"
         return [f"{padded}{leg.osi_symbol}" for leg in self.legs]
+
+    @property
+    def order_data(self) -> list[dict]:
+        """Machine-readable dicts for cotrader order building.
+
+        Each dict: {action, quantity, symbol, option_type, strike, expiration,
+                     osi_symbol, instrument_type}
+        """
+        padded = f"{self.ticker:<6}"
+        return [
+            {
+                "action": leg.action.value,
+                "quantity": leg.quantity,
+                "symbol": self.ticker,
+                "option_type": leg.option_type,
+                "strike": leg.strike,
+                "expiration": leg.expiration.isoformat(),
+                "osi_symbol": f"{padded}{leg.osi_symbol}",
+                "instrument_type": "EQUITY_OPTION",
+            }
+            for leg in self.legs
+        ]
+
+    @property
+    def exit_summary(self) -> str:
+        """One-line exit guidance for display."""
+        parts = []
+        if self.profit_target_pct is not None:
+            parts.append(f"TP {self.profit_target_pct:.0%}")
+        if self.stop_loss_pct is not None:
+            if self.order_side == "credit":
+                parts.append(f"SL {self.stop_loss_pct:.0f}× credit")
+            else:
+                parts.append(f"SL {self.stop_loss_pct:.0%} debit")
+        if self.exit_dte is not None:
+            parts.append(f"close ≤{self.exit_dte} DTE")
+        return " | ".join(parts) if parts else ""

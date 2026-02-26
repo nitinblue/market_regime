@@ -13,7 +13,8 @@ from market_analyzer.opportunity.setups.mean_reversion import assess_mean_revers
 from market_analyzer.opportunity.setups.orb import assess_orb
 from market_analyzer.opportunity.option_plays.zero_dte import assess_zero_dte
 from market_analyzer.opportunity.option_plays.leap import assess_leap
-from market_analyzer.opportunity.option_plays.earnings import assess_earnings_play
+from market_analyzer.opportunity.option_plays.earnings import assess_earnings_play, EarningsOpportunity
+from market_analyzer.opportunity.setups.mean_reversion import MeanReversionOpportunity
 from market_analyzer.opportunity.option_plays.calendar import assess_calendar
 from market_analyzer.opportunity.option_plays.diagonal import assess_diagonal
 from market_analyzer.opportunity.option_plays.iron_condor import assess_iron_condor
@@ -30,6 +31,8 @@ __all__ = [
     "assess_zero_dte",
     "assess_leap",
     "assess_earnings_play",
+    "EarningsOpportunity",
+    "MeanReversionOpportunity",
     "assess_calendar",
     "assess_diagonal",
     "assess_iron_condor",

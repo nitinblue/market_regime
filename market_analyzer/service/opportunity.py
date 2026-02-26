@@ -90,6 +90,7 @@ class OpportunityService:
             )
 
         fundamentals = self._get_fundamentals(ticker)
+        vol_surface = self._get_vol_surface(ticker)
 
         return _assess(
             ticker=ticker,
@@ -98,6 +99,7 @@ class OpportunityService:
             macro=macro,
             fundamentals=fundamentals,
             orb=orb,
+            vol_surface=vol_surface,
             as_of=as_of,
         )
 
@@ -121,6 +123,7 @@ class OpportunityService:
         phase = self.phase_service.detect(ticker, df)
         macro = self.macro_service.calendar(as_of=as_of)
         fundamentals = self._get_fundamentals(ticker)
+        vol_surface = self._get_vol_surface(ticker)
 
         return _assess(
             ticker=ticker,
@@ -129,6 +132,7 @@ class OpportunityService:
             phase=phase,
             macro=macro,
             fundamentals=fundamentals,
+            vol_surface=vol_surface,
             as_of=as_of,
         )
 
@@ -152,6 +156,7 @@ class OpportunityService:
         phase = self.phase_service.detect(ticker, df)
         macro = self.macro_service.calendar(as_of=as_of)
         fundamentals = self._get_fundamentals(ticker)
+        vol_surface = self._get_vol_surface(ticker)
 
         return _assess(
             ticker=ticker,
@@ -160,6 +165,7 @@ class OpportunityService:
             phase=phase,
             macro=macro,
             fundamentals=fundamentals,
+            vol_surface=vol_surface,
             as_of=as_of,
         )
 
@@ -183,6 +189,7 @@ class OpportunityService:
         phase = self.phase_service.detect(ticker, df)
         macro = self.macro_service.calendar(as_of=as_of)
         fundamentals = self._get_fundamentals(ticker)
+        vol_surface = self._get_vol_surface(ticker)
 
         return _assess(
             ticker=ticker,
@@ -191,6 +198,7 @@ class OpportunityService:
             phase=phase,
             macro=macro,
             fundamentals=fundamentals,
+            vol_surface=vol_surface,
             as_of=as_of,
         )
 
@@ -224,6 +232,7 @@ class OpportunityService:
             macro = self.macro_service.calendar(as_of=as_of)
 
         fundamentals = self._get_fundamentals(ticker)
+        vol_surface = self._get_vol_surface(ticker)
 
         return _assess(
             ticker=ticker,
@@ -233,7 +242,57 @@ class OpportunityService:
             phase=phase,
             macro=macro,
             fundamentals=fundamentals,
+            vol_surface=vol_surface,
             as_of=as_of,
+        )
+
+    def assess_earnings(
+        self,
+        ticker: str,
+        ohlcv: pd.DataFrame | None = None,
+        as_of: date | None = None,
+    ):
+        """Assess earnings play opportunity."""
+        from market_analyzer.opportunity.option_plays.earnings import assess_earnings_play as _assess
+
+        if self.regime_service is None or self.technical_service is None:
+            raise ValueError("OpportunityService requires regime and technical services")
+
+        df = self._get_ohlcv(ticker, ohlcv)
+        regime = self.regime_service.detect(ticker, df)
+        technicals = self.technical_service.snapshot(ticker, df)
+        fundamentals = self._get_fundamentals(ticker)
+        vol_surface = self._get_vol_surface(ticker)
+
+        return _assess(
+            ticker=ticker, regime=regime, technicals=technicals,
+            fundamentals=fundamentals, vol_surface=vol_surface, as_of=as_of,
+        )
+
+    def assess_mean_reversion(
+        self,
+        ticker: str,
+        ohlcv: pd.DataFrame | None = None,
+        as_of: date | None = None,
+    ):
+        """Assess mean reversion opportunity."""
+        from market_analyzer.opportunity.setups.mean_reversion import assess_mean_reversion as _assess
+
+        if self.regime_service is None or self.technical_service is None:
+            raise ValueError("OpportunityService requires regime and technical services")
+
+        df = self._get_ohlcv(ticker, ohlcv)
+        regime = self.regime_service.detect(ticker, df)
+        technicals = self.technical_service.snapshot(ticker, df)
+        phase = self.phase_service.detect(ticker, df) if self.phase_service else None
+        macro = self.macro_service.calendar(as_of=as_of) if self.macro_service else None
+        fundamentals = self._get_fundamentals(ticker)
+        vol_surface = self._get_vol_surface(ticker)
+
+        return _assess(
+            ticker=ticker, regime=regime, technicals=technicals,
+            phase=phase, macro=macro, fundamentals=fundamentals,
+            vol_surface=vol_surface, as_of=as_of,
         )
 
     # --- Vol-surface-dependent option plays ---

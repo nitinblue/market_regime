@@ -23,6 +23,7 @@ if TYPE_CHECKING:
     from market_analyzer.models.phase import PhaseResult
     from market_analyzer.models.regime import RegimeResult
     from market_analyzer.models.technicals import TechnicalSnapshot
+    from market_analyzer.models.vol_surface import VolatilitySurface
 
 
 def assess_breakout(
@@ -32,6 +33,7 @@ def assess_breakout(
     phase: PhaseResult,
     macro: MacroCalendar,
     fundamentals: FundamentalsSnapshot | None = None,
+    vol_surface: VolatilitySurface | None = None,
     as_of: date | None = None,
 ) -> BreakoutOpportunity:
     """Assess breakout opportunity for a single instrument.
@@ -86,6 +88,15 @@ def assess_breakout(
     if technicals.vcp is not None and technicals.vcp.pivot_price is not None:
         pivot_price = technicals.vcp.pivot_price
 
+    # --- Trade spec ---
+    trade_spec = None
+    if verdict != Verdict.NO_GO and breakout_strategy != BreakoutStrategy.NO_TRADE:
+        from market_analyzer.opportunity.option_plays._trade_spec_helpers import build_setup_trade_spec
+        trade_spec = build_setup_trade_spec(
+            ticker, technicals.current_price, technicals.atr,
+            breakout_type.value, int(regime.regime), vol_surface,
+        )
+
     # --- Summary ---
     summary = _build_summary(
         ticker, verdict, confidence, breakout_strategy, hard_stops,
@@ -110,6 +121,7 @@ def assess_breakout(
         setup=setup,
         pivot_price=pivot_price,
         days_to_earnings=days_to_earnings,
+        trade_spec=trade_spec,
         summary=summary,
     )
 

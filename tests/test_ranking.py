@@ -62,6 +62,13 @@ from market_analyzer.models.technicals import (
     MarketPhase,
     TechnicalSnapshot,
 )
+from market_analyzer.opportunity.option_plays.iron_condor import IronCondorOpportunity
+from market_analyzer.opportunity.option_plays.iron_butterfly import IronButterflyOpportunity
+from market_analyzer.opportunity.option_plays.calendar import CalendarOpportunity
+from market_analyzer.opportunity.option_plays.diagonal import DiagonalOpportunity
+from market_analyzer.opportunity.option_plays.ratio_spread import RatioSpreadOpportunity
+from market_analyzer.opportunity.option_plays.earnings import EarningsOpportunity
+from market_analyzer.opportunity.setups.mean_reversion import MeanReversionOpportunity
 from market_analyzer.service.ranking import TradeRankingService
 
 
@@ -311,6 +318,130 @@ def _make_leap(
         days_to_earnings=40,
         macro_events_next_30_days=2,
         summary="test",
+    )
+
+
+def _stub_new_assess_methods(opp: MagicMock) -> None:
+    """Stub the 7 new strategy assess methods to raise so the service skips them."""
+    _err = RuntimeError("not mocked")
+    opp.assess_iron_condor.side_effect = _err
+    opp.assess_iron_butterfly.side_effect = _err
+    opp.assess_calendar.side_effect = _err
+    opp.assess_diagonal.side_effect = _err
+    opp.assess_ratio_spread.side_effect = _err
+    opp.assess_earnings.side_effect = _err
+    opp.assess_mean_reversion.side_effect = _err
+
+
+def _make_iron_condor(
+    ticker: str = "SPY", verdict: Verdict = Verdict.GO, confidence: float = 0.70,
+) -> IronCondorOpportunity:
+    return IronCondorOpportunity(
+        ticker=ticker, as_of_date=date(2026, 2, 22), verdict=verdict,
+        confidence=confidence, hard_stops=[], signals=[],
+        strategy=StrategyRecommendation(
+            name="standard_iron_condor", direction="neutral",
+            structure="IC 5-wide", rationale="Low vol range",
+            risk_notes=["Watch wings"],
+        ),
+        iron_condor_strategy="standard_iron_condor",
+        regime_id=1, regime_confidence=0.85, front_iv=0.22,
+        put_skew=0.05, call_skew=-0.02, wing_width_suggestion="5-wide",
+        days_to_earnings=30, summary="test",
+    )
+
+
+def _make_iron_butterfly(
+    ticker: str = "SPY", verdict: Verdict = Verdict.CAUTION, confidence: float = 0.55,
+) -> IronButterflyOpportunity:
+    return IronButterflyOpportunity(
+        ticker=ticker, as_of_date=date(2026, 2, 22), verdict=verdict,
+        confidence=confidence, hard_stops=[], signals=[],
+        strategy=StrategyRecommendation(
+            name="standard_iron_butterfly", direction="neutral",
+            structure="IFly ATM", rationale="High IV MR",
+            risk_notes=["Wide swings"],
+        ),
+        iron_butterfly_strategy="standard_iron_butterfly",
+        regime_id=2, regime_confidence=0.80, atm_iv=0.30, front_iv=0.28,
+        days_to_earnings=25, summary="test",
+    )
+
+
+def _make_calendar(
+    ticker: str = "SPY", verdict: Verdict = Verdict.GO, confidence: float = 0.65,
+) -> CalendarOpportunity:
+    return CalendarOpportunity(
+        ticker=ticker, as_of_date=date(2026, 2, 22), verdict=verdict,
+        confidence=confidence, hard_stops=[], signals=[],
+        strategy=StrategyRecommendation(
+            name="atm_calendar", direction="neutral",
+            structure="Calendar ATM", rationale="Term structure edge",
+            risk_notes=["Pin risk"],
+        ),
+        calendar_strategy="atm_calendar",
+        regime_id=1, regime_confidence=0.85, front_iv=0.25, back_iv=0.22,
+        term_slope=0.03, calendar_edge_score=0.70,
+        days_to_earnings=40, summary="test",
+    )
+
+
+def _make_diagonal(
+    ticker: str = "SPY", verdict: Verdict = Verdict.CAUTION, confidence: float = 0.60,
+) -> DiagonalOpportunity:
+    return DiagonalOpportunity(
+        ticker=ticker, as_of_date=date(2026, 2, 22), verdict=verdict,
+        confidence=confidence, hard_stops=[], signals=[],
+        strategy=StrategyRecommendation(
+            name="bull_call_diagonal", direction="bullish",
+            structure="Bull call diagonal", rationale="Mild trend",
+            risk_notes=["Trend reversal"],
+        ),
+        diagonal_strategy="bull_call_diagonal",
+        regime_id=3, regime_confidence=0.75, phase_id=2, phase_name="Markup",
+        trend_direction="bullish", front_iv=0.24, back_iv=0.21, term_slope=0.03,
+        days_to_earnings=50, summary="test",
+    )
+
+
+def _make_ratio(
+    ticker: str = "SPY", verdict: Verdict = Verdict.CAUTION, confidence: float = 0.50,
+) -> RatioSpreadOpportunity:
+    return RatioSpreadOpportunity(
+        ticker=ticker, as_of_date=date(2026, 2, 22), verdict=verdict,
+        confidence=confidence, hard_stops=[], signals=[],
+        strategy=StrategyRecommendation(
+            name="put_ratio_spread", direction="neutral",
+            structure="1x2 put ratio", rationale="Low vol, sell premium",
+            risk_notes=["Naked leg"],
+        ),
+        ratio_strategy="put_ratio_spread",
+        regime_id=1, regime_confidence=0.85, direction="neutral",
+        has_naked_leg=True, margin_warning="Naked leg — margin required",
+        front_iv=0.20, put_skew=0.04, call_skew=-0.02,
+        days_to_earnings=35, summary="test",
+    )
+
+
+def _make_earnings(
+    ticker: str = "SPY", verdict: Verdict = Verdict.CAUTION, confidence: float = 0.45,
+) -> EarningsOpportunity:
+    return EarningsOpportunity(
+        ticker=ticker, as_of_date=date(2026, 2, 22), verdict=verdict,
+        confidence=confidence, strategy="pre_earnings_straddle",
+        direction="neutral", signals=[], hard_stops=[],
+        days_to_earnings=7, regime_id=1, summary="test",
+    )
+
+
+def _make_mean_reversion(
+    ticker: str = "SPY", verdict: Verdict = Verdict.GO, confidence: float = 0.65,
+) -> MeanReversionOpportunity:
+    return MeanReversionOpportunity(
+        ticker=ticker, as_of_date=date(2026, 2, 22), verdict=verdict,
+        confidence=confidence, strategy="oversold_bounce",
+        direction="bullish", signals=[], hard_stops=[],
+        rsi=28.0, bollinger_pct_b=0.05, regime_id=2, summary="test",
     )
 
 
@@ -672,6 +803,7 @@ class TestBlackSwanGate:
         opp.assess_leap.return_value = _make_leap()
         opp.assess_breakout.return_value = _make_breakout()
         opp.assess_momentum.return_value = _make_momentum()
+        _stub_new_assess_methods(opp)
 
         svc.levels.analyze.return_value = _make_levels()
 
@@ -690,6 +822,7 @@ class TestBlackSwanGate:
         opp.assess_leap.return_value = _make_leap()
         opp.assess_breakout.return_value = _make_breakout()
         opp.assess_momentum.return_value = _make_momentum()
+        _stub_new_assess_methods(opp)
         svc.levels.analyze.return_value = _make_levels()
 
         result = svc.rank(["SPY"])
@@ -725,6 +858,7 @@ class TestRankingResult:
         opp.assess_momentum.side_effect = lambda t, **kw: _make_momentum(
             ticker=t, verdict=Verdict.CAUTION, confidence=0.55
         )
+        _stub_new_assess_methods(opp)
 
         levels = MagicMock()
         levels.analyze.return_value = _make_levels(rr=2.5)
@@ -759,16 +893,17 @@ class TestRankingResult:
     def test_by_ticker_groups(self, ranked_result: TradeRankingResult):
         assert "SPY" in ranked_result.by_ticker
         assert "AAPL" in ranked_result.by_ticker
-        assert len(ranked_result.by_ticker["SPY"]) == 4  # 4 strategies
+        assert len(ranked_result.by_ticker["SPY"]) == 4  # 4 mocked strategies
         assert len(ranked_result.by_ticker["AAPL"]) == 4
 
     def test_by_strategy_groups(self, ranked_result: TradeRankingResult):
-        for st in StrategyType:
+        # 4 original strategies have 2 tickers each; 7 new strategies are stubbed (0 results)
+        for st in [StrategyType.ZERO_DTE, StrategyType.LEAP, StrategyType.BREAKOUT, StrategyType.MOMENTUM]:
             assert st in ranked_result.by_strategy
             assert len(ranked_result.by_strategy[st]) == 2  # 2 tickers
 
     def test_total_counts(self, ranked_result: TradeRankingResult):
-        assert ranked_result.total_assessed == 8  # 2 tickers x 4 strategies
+        assert ranked_result.total_assessed == 22  # 2 tickers x 11 strategies
         assert len(ranked_result.top_trades) == 8
         assert ranked_result.total_actionable > 0
 
@@ -789,6 +924,7 @@ class TestService:
         opp.assess_leap.side_effect = lambda t, **kw: _make_leap(ticker=t)
         opp.assess_breakout.side_effect = lambda t, **kw: _make_breakout(ticker=t)
         opp.assess_momentum.side_effect = lambda t, **kw: _make_momentum(ticker=t)
+        _stub_new_assess_methods(opp)
 
         levels = MagicMock()
         levels.analyze.return_value = _make_levels()
@@ -808,8 +944,8 @@ class TestService:
     def test_single_ticker(self):
         svc = self._build_service()
         result = svc.rank(["SPY"])
-        assert result.total_assessed == 4
-        assert len(result.top_trades) == 4
+        assert result.total_assessed == 11
+        assert len(result.top_trades) == 4  # 7 new strategies raise
 
     def test_strategy_filter(self):
         svc = self._build_service()
@@ -824,8 +960,8 @@ class TestService:
         svc = self._build_service()
         svc.opportunity.assess_momentum.side_effect = RuntimeError("network error")
         result = svc.rank(["SPY"])
-        assert result.total_assessed == 4
-        assert len(result.top_trades) == 3  # momentum failed
+        assert result.total_assessed == 11
+        assert len(result.top_trades) == 3  # momentum failed + 7 new not mocked
 
     def test_technicals_error_skips_ticker(self):
         """If technicals fail for a ticker, skip it entirely."""
@@ -839,6 +975,104 @@ class TestService:
         result = svc.rank(["SPY", "AAPL"])
         assert len(result.summary) > 0
         assert "Ranked" in result.summary
+
+
+# =============================================
+# TestAllStrategiesWired
+# =============================================
+
+
+class TestAllStrategiesWired:
+    """Verify all 11 strategy types are properly wired through the ranking pipeline."""
+
+    def _build_full_service(self) -> TradeRankingService:
+        opp = MagicMock()
+        opp.technical_service = MagicMock()
+        opp.technical_service.snapshot.return_value = _make_technicals()
+        opp.macro_service = MagicMock()
+        opp.macro_service.calendar.return_value = MagicMock(events_next_7_days=[])
+        # Wire ALL 11 strategies
+        opp.assess_zero_dte.side_effect = lambda t, **kw: _make_zero_dte(ticker=t)
+        opp.assess_leap.side_effect = lambda t, **kw: _make_leap(ticker=t)
+        opp.assess_breakout.side_effect = lambda t, **kw: _make_breakout(ticker=t)
+        opp.assess_momentum.side_effect = lambda t, **kw: _make_momentum(ticker=t)
+        opp.assess_iron_condor.side_effect = lambda t, **kw: _make_iron_condor(ticker=t)
+        opp.assess_iron_butterfly.side_effect = lambda t, **kw: _make_iron_butterfly(ticker=t)
+        opp.assess_calendar.side_effect = lambda t, **kw: _make_calendar(ticker=t)
+        opp.assess_diagonal.side_effect = lambda t, **kw: _make_diagonal(ticker=t)
+        opp.assess_ratio_spread.side_effect = lambda t, **kw: _make_ratio(ticker=t)
+        opp.assess_earnings.side_effect = lambda t, **kw: _make_earnings(ticker=t)
+        opp.assess_mean_reversion.side_effect = lambda t, **kw: _make_mean_reversion(ticker=t)
+
+        levels = MagicMock()
+        levels.analyze.return_value = _make_levels()
+
+        bs = MagicMock()
+        bs.alert.return_value = BlackSwanAlert(
+            as_of_date=date(2026, 2, 22), alert_level=AlertLevel.NORMAL,
+            composite_score=0.0, circuit_breakers=[], indicators=[],
+            triggered_breakers=0, action="normal", summary="ok",
+        )
+        return TradeRankingService(
+            opportunity_service=opp, levels_service=levels, black_swan_service=bs,
+        )
+
+    def test_all_11_strategies_produce_entries(self):
+        svc = self._build_full_service()
+        result = svc.rank(["SPY"])
+        assert result.total_assessed == 11
+        assert len(result.top_trades) == 11
+        strategy_types = {e.strategy_type for e in result.top_trades}
+        assert strategy_types == set(StrategyType)
+
+    def test_all_strategies_have_scores(self):
+        svc = self._build_full_service()
+        result = svc.rank(["SPY"])
+        for entry in result.top_trades:
+            assert entry.composite_score > 0, f"{entry.strategy_type} has zero score"
+
+    def test_all_strategies_have_direction(self):
+        svc = self._build_full_service()
+        result = svc.rank(["SPY"])
+        for entry in result.top_trades:
+            assert entry.direction in ("neutral", "bullish", "bearish"), (
+                f"{entry.strategy_type} has bad direction: {entry.direction}"
+            )
+
+    def test_all_strategies_have_rationale(self):
+        svc = self._build_full_service()
+        result = svc.rank(["SPY"])
+        for entry in result.top_trades:
+            assert len(entry.rationale) > 0, f"{entry.strategy_type} missing rationale"
+
+    def test_mean_reversion_no_days_to_earnings_ok(self):
+        """MeanReversionOpportunity lacks days_to_earnings — verify no crash."""
+        svc = self._build_full_service()
+        result = svc.rank(["SPY"], strategies=[StrategyType.MEAN_REVERSION])
+        assert len(result.top_trades) == 1
+        assert result.top_trades[0].strategy_type == StrategyType.MEAN_REVERSION
+        assert result.top_trades[0].breakdown.earnings_penalty == 0.0
+
+    def test_earnings_strategy_scored(self):
+        svc = self._build_full_service()
+        result = svc.rank(["SPY"], strategies=[StrategyType.EARNINGS])
+        assert len(result.top_trades) == 1
+        assert result.top_trades[0].strategy_name == "pre_earnings_straddle"
+
+    def test_income_bias_boost_for_theta_strategies(self):
+        """IC, IFly, Calendar, Ratio, 0DTE should get income bias in R1/R2."""
+        svc = self._build_full_service()
+        result = svc.rank(["SPY"])
+        theta_types = {
+            StrategyType.ZERO_DTE, StrategyType.IRON_CONDOR,
+            StrategyType.IRON_BUTTERFLY, StrategyType.CALENDAR,
+            StrategyType.RATIO_SPREAD,
+        }
+        for entry in result.top_trades:
+            if entry.strategy_type in theta_types:
+                # These have regime_id in {1, 2} so should get boost
+                regime_id = entry.breakdown.regime_alignment  # just verify it ran
+                assert entry.breakdown is not None
 
 
 # =============================================

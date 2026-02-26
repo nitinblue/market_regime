@@ -22,6 +22,7 @@ if TYPE_CHECKING:
     from market_analyzer.models.phase import PhaseResult
     from market_analyzer.models.regime import RegimeResult
     from market_analyzer.models.technicals import TechnicalSnapshot
+    from market_analyzer.models.vol_surface import VolatilitySurface
 
 
 def assess_leap(
@@ -31,6 +32,7 @@ def assess_leap(
     phase: PhaseResult,
     macro: MacroCalendar,
     fundamentals: FundamentalsSnapshot | None = None,
+    vol_surface: VolatilitySurface | None = None,
     as_of: date | None = None,
 ) -> LEAPOpportunity:
     """Assess LEAP opportunity for a single instrument.
@@ -81,6 +83,13 @@ def assess_leap(
         regime, phase, iv_env, verdict,
     )
 
+    # --- Trade spec ---
+    trade_spec = None
+    if verdict != Verdict.NO_GO and leap_strategy != LEAPStrategy.NO_TRADE:
+        trade_spec = _build_leap_trade_spec(
+            ticker, technicals, leap_strategy, strategy_rec, vol_surface,
+        )
+
     # --- Summary ---
     summary = _build_summary(
         ticker, verdict, confidence, leap_strategy, hard_stops,
@@ -105,6 +114,7 @@ def assess_leap(
         fundamental_score=fund_score,
         days_to_earnings=days_to_earnings,
         macro_events_next_30_days=len(macro.events_next_30_days),
+        trade_spec=trade_spec,
         summary=summary,
     )
 
@@ -534,6 +544,136 @@ def _select_strategy(
             )
         else:
             return _no_trade("Markdown phase — wait for accumulation (P1) before bullish LEAPs.")
+
+
+def _build_leap_trade_spec(
+    ticker: str,
+    technicals: TechnicalSnapshot,
+    leap_strategy: LEAPStrategy,
+    strategy_rec: StrategyRecommendation,
+    vol_surface: VolatilitySurface | None,
+):
+    """Build LEAP trade spec. Target 365-545 DTE."""
+    from market_analyzer.models.opportunity import OrderSide, StructureType, TradeSpec
+    from market_analyzer.opportunity.option_plays._trade_spec_helpers import (
+        build_debit_spread_legs,
+        build_long_option_legs,
+        build_pmcc_legs,
+        find_best_expiration,
+    )
+
+    if vol_surface is None or not vol_surface.term_structure:
+        return None
+
+    price = technicals.current_price
+    atr = technicals.atr
+
+    try:
+        if leap_strategy in (LEAPStrategy.BULL_CALL_LEAP, LEAPStrategy.BEAR_PUT_LEAP):
+            exp_pt = find_best_expiration(vol_surface.term_structure, 365, 545)
+            if exp_pt is None:
+                exp_pt = find_best_expiration(vol_surface.term_structure, 180, 730)
+            if exp_pt is None:
+                return None
+            opt_type = "call" if leap_strategy == LEAPStrategy.BULL_CALL_LEAP else "put"
+            legs = build_long_option_legs(
+                price, opt_type, exp_pt.expiration, exp_pt.days_to_expiry, exp_pt.atm_iv,
+            )
+            return TradeSpec(
+                ticker=ticker, legs=legs, underlying_price=price,
+                target_dte=exp_pt.days_to_expiry, target_expiration=exp_pt.expiration,
+                spec_rationale=f"LEAP {opt_type}. {exp_pt.days_to_expiry} DTE.",
+                structure_type=StructureType.LONG_OPTION,
+                order_side=OrderSide.DEBIT,
+                profit_target_pct=1.0,
+                stop_loss_pct=0.50,
+                max_profit_desc="Unlimited (long option)",
+                max_loss_desc="Premium paid",
+                exit_notes=["Time decay works against you — monitor theta",
+                            "Close at 50% loss of premium paid",
+                            "Consider rolling to later expiry at 180 DTE"],
+            )
+
+        elif leap_strategy == LEAPStrategy.BULL_CALL_SPREAD:
+            exp_pt = find_best_expiration(vol_surface.term_structure, 365, 545)
+            if exp_pt is None:
+                exp_pt = find_best_expiration(vol_surface.term_structure, 180, 730)
+            if exp_pt is None:
+                return None
+            legs = build_debit_spread_legs(
+                price, atr, "bullish", exp_pt.expiration, exp_pt.days_to_expiry, exp_pt.atm_iv,
+                width_multiplier=1.0,
+            )
+            return TradeSpec(
+                ticker=ticker, legs=legs, underlying_price=price,
+                target_dte=exp_pt.days_to_expiry, target_expiration=exp_pt.expiration,
+                spec_rationale=f"LEAP bull call spread. {exp_pt.days_to_expiry} DTE.",
+                structure_type=StructureType.DEBIT_SPREAD,
+                order_side=OrderSide.DEBIT,
+                profit_target_pct=0.50,
+                stop_loss_pct=0.50,
+                max_profit_desc="Spread width minus debit paid",
+                max_loss_desc="Net debit paid",
+                exit_notes=["Target 50% of max profit",
+                            "Close at 50% loss of debit paid",
+                            "Consider rolling to later expiry at 180 DTE"],
+            )
+
+        elif leap_strategy == LEAPStrategy.PROTECTIVE_PUT:
+            exp_pt = find_best_expiration(vol_surface.term_structure, 365, 545)
+            if exp_pt is None:
+                exp_pt = find_best_expiration(vol_surface.term_structure, 180, 730)
+            if exp_pt is None:
+                return None
+            legs = build_long_option_legs(
+                price, "put", exp_pt.expiration, exp_pt.days_to_expiry, exp_pt.atm_iv,
+                otm_multiplier=1.0, atr=atr,
+            )
+            return TradeSpec(
+                ticker=ticker, legs=legs, underlying_price=price,
+                target_dte=exp_pt.days_to_expiry, target_expiration=exp_pt.expiration,
+                spec_rationale=f"LEAP protective put (1 ATR OTM). {exp_pt.days_to_expiry} DTE.",
+                structure_type=StructureType.LONG_OPTION,
+                order_side=OrderSide.DEBIT,
+                profit_target_pct=1.0,
+                stop_loss_pct=0.50,
+                max_profit_desc="Unlimited (protective hedge)",
+                max_loss_desc="Premium paid (insurance cost)",
+                exit_notes=["Protective put — hedge, not primary income",
+                            "Roll to later expiry before 90 DTE",
+                            "Close if underlying recovers above entry"],
+            )
+
+        elif leap_strategy == LEAPStrategy.PMCC:
+            front_pt = find_best_expiration(vol_surface.term_structure, 30, 45)
+            back_pt = find_best_expiration(vol_surface.term_structure, 365, 545)
+            if back_pt is None:
+                back_pt = find_best_expiration(vol_surface.term_structure, 180, 730)
+            if front_pt is None or back_pt is None:
+                return None
+            legs = build_pmcc_legs(price, atr, front_pt, back_pt)
+            return TradeSpec(
+                ticker=ticker, legs=legs, underlying_price=price,
+                target_dte=front_pt.days_to_expiry, target_expiration=front_pt.expiration,
+                front_expiration=front_pt.expiration, front_dte=front_pt.days_to_expiry,
+                back_expiration=back_pt.expiration, back_dte=back_pt.days_to_expiry,
+                iv_at_front=front_pt.atm_iv, iv_at_back=back_pt.atm_iv,
+                spec_rationale=f"PMCC: front {front_pt.days_to_expiry}d, back {back_pt.days_to_expiry}d.",
+                structure_type=StructureType.PMCC,
+                order_side=OrderSide.DEBIT,
+                profit_target_pct=0.50,
+                stop_loss_pct=0.50,
+                exit_dte=max(front_pt.days_to_expiry - 7, 0),
+                max_profit_desc="Front leg decay + back leg appreciation",
+                max_loss_desc="Net debit on back leg minus front premium collected",
+                exit_notes=["Roll front leg on 50% profit for recurring income",
+                            "Close front before expiry to avoid assignment",
+                            "Monitor back leg delta — close if stock drops below back strike"],
+            )
+    except Exception:
+        return None
+
+    return None
 
 
 def _no_trade(rationale: str) -> tuple[LEAPStrategy, StrategyRecommendation]:

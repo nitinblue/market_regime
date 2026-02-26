@@ -19,6 +19,7 @@ from market_analyzer.models.levels import LevelsAnalysis
 
 # Regime x Strategy alignment (R1=1, R2=2, R3=3, R4=4)
 REGIME_STRATEGY_ALIGNMENT: dict[tuple[int, StrategyType], float] = {
+    # Original 4
     (1, StrategyType.ZERO_DTE): 1.0,
     (1, StrategyType.LEAP): 0.3,
     (1, StrategyType.BREAKOUT): 0.4,
@@ -35,10 +36,46 @@ REGIME_STRATEGY_ALIGNMENT: dict[tuple[int, StrategyType], float] = {
     (4, StrategyType.LEAP): 0.5,
     (4, StrategyType.BREAKOUT): 1.0,
     (4, StrategyType.MOMENTUM): 0.8,
+    # Iron Condor: R1 ideal (low-vol MR), R2 acceptable, R3/R4 poor
+    (1, StrategyType.IRON_CONDOR): 1.0,
+    (2, StrategyType.IRON_CONDOR): 0.8,
+    (3, StrategyType.IRON_CONDOR): 0.2,
+    (4, StrategyType.IRON_CONDOR): 0.1,
+    # Iron Butterfly: R2 ideal (high IV + MR), R1 good
+    (1, StrategyType.IRON_BUTTERFLY): 0.6,
+    (2, StrategyType.IRON_BUTTERFLY): 1.0,
+    (3, StrategyType.IRON_BUTTERFLY): 0.2,
+    (4, StrategyType.IRON_BUTTERFLY): 0.1,
+    # Calendar: R1/R2 ideal (stable IV term structure)
+    (1, StrategyType.CALENDAR): 0.9,
+    (2, StrategyType.CALENDAR): 0.8,
+    (3, StrategyType.CALENDAR): 0.5,
+    (4, StrategyType.CALENDAR): 0.3,
+    # Diagonal: R3 ideal (mild trend), R1/R2 acceptable
+    (1, StrategyType.DIAGONAL): 0.5,
+    (2, StrategyType.DIAGONAL): 0.5,
+    (3, StrategyType.DIAGONAL): 1.0,
+    (4, StrategyType.DIAGONAL): 0.3,
+    # Ratio Spread: R1 ideal (low vol, naked leg manageable)
+    (1, StrategyType.RATIO_SPREAD): 1.0,
+    (2, StrategyType.RATIO_SPREAD): 0.6,
+    (3, StrategyType.RATIO_SPREAD): 0.4,
+    (4, StrategyType.RATIO_SPREAD): 0.1,
+    # Earnings: event-driven, regime matters less
+    (1, StrategyType.EARNINGS): 0.6,
+    (2, StrategyType.EARNINGS): 0.7,
+    (3, StrategyType.EARNINGS): 0.5,
+    (4, StrategyType.EARNINGS): 0.4,
+    # Mean Reversion: R1/R2 ideal (MR regimes)
+    (1, StrategyType.MEAN_REVERSION): 0.8,
+    (2, StrategyType.MEAN_REVERSION): 1.0,
+    (3, StrategyType.MEAN_REVERSION): 0.3,
+    (4, StrategyType.MEAN_REVERSION): 0.1,
 }
 
 # Phase x Strategy alignment (P1=1, P2=2, P3=3, P4=4)
 PHASE_STRATEGY_ALIGNMENT: dict[tuple[int, StrategyType], float] = {
+    # Original 4
     (1, StrategyType.ZERO_DTE): 0.7,
     (1, StrategyType.LEAP): 0.9,
     (1, StrategyType.BREAKOUT): 1.0,
@@ -55,6 +92,41 @@ PHASE_STRATEGY_ALIGNMENT: dict[tuple[int, StrategyType], float] = {
     (4, StrategyType.LEAP): 0.1,
     (4, StrategyType.BREAKOUT): 0.2,
     (4, StrategyType.MOMENTUM): 0.6,
+    # IC: best in P1 accumulation (range-bound), P3 distribution
+    (1, StrategyType.IRON_CONDOR): 0.9,
+    (2, StrategyType.IRON_CONDOR): 0.5,
+    (3, StrategyType.IRON_CONDOR): 0.8,
+    (4, StrategyType.IRON_CONDOR): 0.3,
+    # IFly: P1/P3 (range-bound phases)
+    (1, StrategyType.IRON_BUTTERFLY): 0.8,
+    (2, StrategyType.IRON_BUTTERFLY): 0.4,
+    (3, StrategyType.IRON_BUTTERFLY): 0.7,
+    (4, StrategyType.IRON_BUTTERFLY): 0.3,
+    # Calendar: P1 ideal (stable), P3 acceptable
+    (1, StrategyType.CALENDAR): 0.9,
+    (2, StrategyType.CALENDAR): 0.6,
+    (3, StrategyType.CALENDAR): 0.7,
+    (4, StrategyType.CALENDAR): 0.3,
+    # Diagonal: P2 ideal (trending phase)
+    (1, StrategyType.DIAGONAL): 0.5,
+    (2, StrategyType.DIAGONAL): 1.0,
+    (3, StrategyType.DIAGONAL): 0.4,
+    (4, StrategyType.DIAGONAL): 0.6,
+    # Ratio: P1/P3 (range-bound, manageable naked leg)
+    (1, StrategyType.RATIO_SPREAD): 0.9,
+    (2, StrategyType.RATIO_SPREAD): 0.4,
+    (3, StrategyType.RATIO_SPREAD): 0.7,
+    (4, StrategyType.RATIO_SPREAD): 0.2,
+    # Earnings: event-driven, phase matters less
+    (1, StrategyType.EARNINGS): 0.5,
+    (2, StrategyType.EARNINGS): 0.5,
+    (3, StrategyType.EARNINGS): 0.5,
+    (4, StrategyType.EARNINGS): 0.5,
+    # Mean Reversion: P3/P4 (overextended phases)
+    (1, StrategyType.MEAN_REVERSION): 0.4,
+    (2, StrategyType.MEAN_REVERSION): 0.6,
+    (3, StrategyType.MEAN_REVERSION): 0.8,
+    (4, StrategyType.MEAN_REVERSION): 1.0,
 }
 
 
@@ -156,7 +228,14 @@ def compute_income_bias_boost(
     if cfg is None:
         cfg = get_settings().ranking
 
-    if strategy == StrategyType.ZERO_DTE and regime_id in (1, 2):
+    _THETA_STRATEGIES = {
+        StrategyType.ZERO_DTE,
+        StrategyType.IRON_CONDOR,
+        StrategyType.IRON_BUTTERFLY,
+        StrategyType.CALENDAR,
+        StrategyType.RATIO_SPREAD,
+    }
+    if strategy in _THETA_STRATEGIES and regime_id in (1, 2):
         return cfg.income_bias_boost
     return 0.0
 

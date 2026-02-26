@@ -4,7 +4,7 @@ from datetime import date, timedelta
 
 import pytest
 
-from market_analyzer.models.opportunity import LegSpec, TradeSpec
+from market_analyzer.models.opportunity import LegAction, LegSpec, TradeSpec
 from market_analyzer.models.vol_surface import TermStructurePoint, SkewSlice, VolatilitySurface
 from market_analyzer.opportunity.option_plays._trade_spec_helpers import (
     snap_strike,
@@ -154,14 +154,16 @@ class TestBuildSingleExpiryTradeSpec:
         short_legs = [l for l in spec.legs if l.role.startswith("short")]
         assert short_legs[0].strike == short_legs[1].strike
 
-    def test_ratio_spread_produces_3_legs(self) -> None:
+    def test_ratio_spread_produces_2_legs_with_quantity(self) -> None:
         vs = _vol_surface()
         spec = build_single_expiry_trade_spec(
             ticker="SPY", price=580.0, atr=5.8, regime_id=1, vol_surface=vs,
             structure_type="ratio_spread", direction="bullish",
         )
         assert spec is not None
-        assert len(spec.legs) == 3
+        assert len(spec.legs) == 2
+        short_leg = [l for l in spec.legs if l.action == LegAction.SELL_TO_OPEN][0]
+        assert short_leg.quantity == 2
 
     def test_wing_width_populated_for_ic(self) -> None:
         vs = _vol_surface()
@@ -246,23 +248,32 @@ class TestBuildDualExpiryTradeSpec:
 class TestLegSpecProperties:
     def test_short_code(self) -> None:
         leg = LegSpec(
-            role="short_put", option_type="put", strike=570.0,
+            role="short_put", action=LegAction.SELL_TO_OPEN, option_type="put", strike=570.0,
             strike_label="test", expiration=date(2026, 3, 27),
             days_to_expiry=31, atm_iv_at_expiry=0.22,
         )
-        assert leg.short_code == "570P 3/27"
+        assert leg.short_code == "STO 1x 570P 3/27/26"
 
     def test_short_code_half_dollar_strike(self) -> None:
         leg = LegSpec(
-            role="short_put", option_type="call", strike=32.5,
+            role="short_put", action=LegAction.SELL_TO_OPEN, option_type="call", strike=32.5,
             strike_label="test", expiration=date(2026, 4, 17),
             days_to_expiry=47, atm_iv_at_expiry=0.30,
         )
-        assert leg.short_code == "32.5C 4/17"
+        assert leg.short_code == "STO 1x 32.5C 4/17/26"
+
+    def test_short_code_quantity_2(self) -> None:
+        leg = LegSpec(
+            role="short_call", action=LegAction.SELL_TO_OPEN, quantity=2,
+            option_type="call", strike=590.0,
+            strike_label="test", expiration=date(2026, 3, 27),
+            days_to_expiry=31, atm_iv_at_expiry=0.22,
+        )
+        assert leg.short_code == "STO 2x 590C 3/27/26"
 
     def test_osi_symbol(self) -> None:
         leg = LegSpec(
-            role="short_put", option_type="put", strike=570.0,
+            role="short_put", action=LegAction.SELL_TO_OPEN, option_type="put", strike=570.0,
             strike_label="test", expiration=date(2026, 3, 27),
             days_to_expiry=31, atm_iv_at_expiry=0.22,
         )
@@ -270,7 +281,7 @@ class TestLegSpecProperties:
 
     def test_osi_symbol_call(self) -> None:
         leg = LegSpec(
-            role="long_call", option_type="call", strike=590.0,
+            role="long_call", action=LegAction.BUY_TO_OPEN, option_type="call", strike=590.0,
             strike_label="test", expiration=date(2026, 3, 27),
             days_to_expiry=31, atm_iv_at_expiry=0.22,
         )
@@ -284,10 +295,12 @@ class TestTradeSpecProperties:
         spec = TradeSpec(
             ticker="SPY",
             legs=[
-                LegSpec(role="short_put", option_type="put", strike=570.0,
+                LegSpec(role="short_put", action=LegAction.SELL_TO_OPEN,
+                        option_type="put", strike=570.0,
                         strike_label="", expiration=date(2026, 3, 27),
                         days_to_expiry=31, atm_iv_at_expiry=0.22),
-                LegSpec(role="short_call", option_type="call", strike=590.0,
+                LegSpec(role="short_call", action=LegAction.SELL_TO_OPEN,
+                        option_type="call", strike=590.0,
                         strike_label="", expiration=date(2026, 3, 27),
                         days_to_expiry=31, atm_iv_at_expiry=0.22),
             ],
@@ -297,13 +310,14 @@ class TestTradeSpecProperties:
             spec_rationale="test",
         )
         codes = spec.leg_codes
-        assert codes == ["SPY 570P 3/27", "SPY 590C 3/27"]
+        assert codes == ["STO 1x SPY P570 3/27/26", "STO 1x SPY C590 3/27/26"]
 
     def test_streamer_symbols(self) -> None:
         spec = TradeSpec(
             ticker="SPY",
             legs=[
-                LegSpec(role="short_put", option_type="put", strike=570.0,
+                LegSpec(role="short_put", action=LegAction.SELL_TO_OPEN,
+                        option_type="put", strike=570.0,
                         strike_label="", expiration=date(2026, 3, 27),
                         days_to_expiry=31, atm_iv_at_expiry=0.22),
             ],
@@ -316,8 +330,271 @@ class TestTradeSpecProperties:
         assert len(syms) == 1
         assert syms[0] == "SPY   260327P00570000"
 
+    def test_order_data(self) -> None:
+        spec = TradeSpec(
+            ticker="SPY",
+            legs=[
+                LegSpec(role="short_put", action=LegAction.SELL_TO_OPEN,
+                        option_type="put", strike=570.0,
+                        strike_label="", expiration=date(2026, 3, 27),
+                        days_to_expiry=31, atm_iv_at_expiry=0.22),
+            ],
+            underlying_price=580.0,
+            target_dte=31,
+            target_expiration=date(2026, 3, 27),
+            spec_rationale="test",
+        )
+        od = spec.order_data
+        assert len(od) == 1
+        assert od[0]["action"] == "STO"
+        assert od[0]["quantity"] == 1
+        assert od[0]["symbol"] == "SPY"
+        assert od[0]["strike"] == 570.0
+        assert od[0]["option_type"] == "put"
+        assert "260327P00570000" in od[0]["osi_symbol"]
+
+
+# --- Inverse Iron Condor (Iron Man) ---
+
+class TestBuildInverseIronCondorLegs:
+    """Tests for the Iron Man (inverse IC) leg builder."""
+
+    def test_produces_4_legs(self) -> None:
+        from market_analyzer.opportunity.option_plays._trade_spec_helpers import (
+            build_inverse_iron_condor_legs,
+        )
+        # Use price=$100 (tick=$1) with atr=$5 for clear strike separation
+        legs, wing = build_inverse_iron_condor_legs(
+            price=100.0, atr=5.0, regime_id=1,
+            expiration=date(2026, 3, 1), dte=0, atm_iv=0.22,
+        )
+        assert len(legs) == 4
+        assert wing > 0
+
+    def test_long_strikes_inside_short_strikes(self) -> None:
+        """Inner (long) strikes should be closer to price than outer (short) strikes."""
+        from market_analyzer.opportunity.option_plays._trade_spec_helpers import (
+            build_inverse_iron_condor_legs,
+        )
+        legs, _ = build_inverse_iron_condor_legs(
+            price=100.0, atr=5.0, regime_id=1,
+            expiration=date(2026, 3, 1), dte=0, atm_iv=0.22,
+        )
+        long_put = next(l for l in legs if l.role == "long_put")
+        short_put = next(l for l in legs if l.role == "short_put")
+        long_call = next(l for l in legs if l.role == "long_call")
+        short_call = next(l for l in legs if l.role == "short_call")
+
+        # Long put closer to price (higher) than short put
+        assert long_put.strike > short_put.strike
+        # Long call closer to price (lower) than short call
+        assert long_call.strike < short_call.strike
+
+    def test_actions_correct(self) -> None:
+        """BTO on inner legs, STO on outer legs."""
+        from market_analyzer.opportunity.option_plays._trade_spec_helpers import (
+            build_inverse_iron_condor_legs,
+        )
+        legs, _ = build_inverse_iron_condor_legs(
+            price=100.0, atr=5.0, regime_id=1,
+            expiration=date(2026, 3, 1), dte=0, atm_iv=0.22,
+        )
+        for leg in legs:
+            if "long" in leg.role:
+                assert leg.action == LegAction.BUY_TO_OPEN
+            else:
+                assert leg.action == LegAction.SELL_TO_OPEN
+
+    def test_orb_aware_uses_range_for_long_strikes(self) -> None:
+        """When ORB range provided, long strikes placed at ORB edges."""
+        from market_analyzer.opportunity.option_plays._trade_spec_helpers import (
+            build_inverse_iron_condor_legs,
+        )
+        legs, _ = build_inverse_iron_condor_legs(
+            price=100.0, atr=5.0, regime_id=1,
+            expiration=date(2026, 3, 1), dte=0, atm_iv=0.22,
+            orb_range_high=102.0, orb_range_low=98.0,
+        )
+        long_put = next(l for l in legs if l.role == "long_put")
+        long_call = next(l for l in legs if l.role == "long_call")
+
+        # Long strikes should be at/near ORB range edges (snapped to $1 ticks at $100)
+        assert long_put.strike == 98.0
+        assert long_call.strike == 102.0
+
+    def test_without_orb_uses_atr_for_long_strikes(self) -> None:
+        from market_analyzer.opportunity.option_plays._trade_spec_helpers import (
+            build_inverse_iron_condor_legs,
+        )
+        legs, _ = build_inverse_iron_condor_legs(
+            price=100.0, atr=5.0, regime_id=1,
+            expiration=date(2026, 3, 1), dte=0, atm_iv=0.22,
+        )
+        long_put = next(l for l in legs if l.role == "long_put")
+        long_call = next(l for l in legs if l.role == "long_call")
+        # Without ORB, long strikes at 0.5 ATR from price (R1)
+        assert long_put.strike < 100.0
+        assert long_call.strike > 100.0
+
+    def test_labels_mention_orb(self) -> None:
+        from market_analyzer.opportunity.option_plays._trade_spec_helpers import (
+            build_inverse_iron_condor_legs,
+        )
+        legs, _ = build_inverse_iron_condor_legs(
+            price=100.0, atr=5.0, regime_id=1,
+            expiration=date(2026, 3, 1), dte=0, atm_iv=0.22,
+            orb_range_high=102.0, orb_range_low=98.0,
+        )
+        long_put = next(l for l in legs if l.role == "long_put")
+        assert "ORB" in long_put.strike_label
+
 
 # --- Integration: NO_GO has no trade_spec ---
+
+class TestStructureTypeAndExitFields:
+    """Tests for structure_type, order_side, and exit guidance fields."""
+
+    def test_ic_has_structure_type_and_side(self) -> None:
+        vs = _vol_surface()
+        spec = build_single_expiry_trade_spec(
+            ticker="SPY", price=580.0, atr=5.8, regime_id=1, vol_surface=vs,
+            structure_type="iron_condor",
+        )
+        assert spec is not None
+        assert spec.structure_type == "iron_condor"
+        assert spec.order_side == "credit"
+
+    def test_ifly_has_structure_type_and_side(self) -> None:
+        vs = _vol_surface()
+        spec = build_single_expiry_trade_spec(
+            ticker="SPY", price=580.0, atr=5.8, regime_id=2, vol_surface=vs,
+            structure_type="iron_butterfly",
+        )
+        assert spec is not None
+        assert spec.structure_type == "iron_butterfly"
+        assert spec.order_side == "credit"
+
+    def test_ratio_has_structure_type(self) -> None:
+        vs = _vol_surface()
+        spec = build_single_expiry_trade_spec(
+            ticker="SPY", price=580.0, atr=5.8, regime_id=1, vol_surface=vs,
+            structure_type="ratio_spread", direction="bullish",
+        )
+        assert spec is not None
+        assert spec.structure_type == "ratio_spread"
+        assert spec.order_side == "credit"
+
+    def test_calendar_has_structure_type(self) -> None:
+        vs = _vol_surface()
+        spec = build_dual_expiry_trade_spec(
+            ticker="SPY", price=580.0, atr=5.8, vol_surface=vs,
+            structure_type="calendar", strategy_type="atm_calendar",
+        )
+        assert spec is not None
+        assert spec.structure_type == "calendar"
+        assert spec.order_side == "debit"
+
+    def test_diagonal_has_structure_type(self) -> None:
+        vs = _vol_surface()
+        spec = build_dual_expiry_trade_spec(
+            ticker="SPY", price=580.0, atr=5.8, vol_surface=vs,
+            structure_type="diagonal", strategy_type="bull_call_diagonal",
+            trend_direction="bullish",
+        )
+        assert spec is not None
+        assert spec.structure_type == "diagonal"
+        assert spec.order_side == "debit"
+
+    def test_ic_exit_fields_populated(self) -> None:
+        vs = _vol_surface()
+        spec = build_single_expiry_trade_spec(
+            ticker="SPY", price=580.0, atr=5.8, regime_id=1, vol_surface=vs,
+            structure_type="iron_condor",
+        )
+        assert spec is not None
+        assert spec.profit_target_pct == 0.50
+        assert spec.stop_loss_pct == 2.0
+        assert spec.exit_dte == 21
+        assert spec.max_profit_desc is not None
+        assert spec.max_loss_desc is not None
+        assert len(spec.exit_notes) > 0
+
+    def test_ifly_exit_fields_populated(self) -> None:
+        vs = _vol_surface()
+        spec = build_single_expiry_trade_spec(
+            ticker="SPY", price=580.0, atr=5.8, regime_id=2, vol_surface=vs,
+            structure_type="iron_butterfly",
+        )
+        assert spec is not None
+        assert spec.profit_target_pct == 0.25
+        assert spec.stop_loss_pct == 2.0
+        assert spec.exit_dte == 14
+
+    def test_calendar_exit_dte_before_front_expiry(self) -> None:
+        vs = _vol_surface()
+        spec = build_dual_expiry_trade_spec(
+            ticker="SPY", price=580.0, atr=5.8, vol_surface=vs,
+            structure_type="calendar", strategy_type="atm_calendar",
+        )
+        assert spec is not None
+        # exit_dte should be front_dte - 7 (or 0 if front is very short)
+        assert spec.exit_dte is not None
+        assert spec.exit_dte <= spec.front_dte
+
+    def test_ratio_exit_notes_warn_naked_leg(self) -> None:
+        vs = _vol_surface()
+        spec = build_single_expiry_trade_spec(
+            ticker="SPY", price=580.0, atr=5.8, regime_id=1, vol_surface=vs,
+            structure_type="ratio_spread", direction="bullish",
+        )
+        assert spec is not None
+        assert any("NAKED" in note for note in spec.exit_notes)
+        assert "UNLIMITED" in spec.max_loss_desc
+
+    def test_exit_summary_property(self) -> None:
+        vs = _vol_surface()
+        spec = build_single_expiry_trade_spec(
+            ticker="SPY", price=580.0, atr=5.8, regime_id=1, vol_surface=vs,
+            structure_type="iron_condor",
+        )
+        assert spec is not None
+        summary = spec.exit_summary
+        assert "TP 50%" in summary
+        assert "credit" in summary.lower()
+
+    def test_order_data_has_instrument_type(self) -> None:
+        vs = _vol_surface()
+        spec = build_single_expiry_trade_spec(
+            ticker="SPY", price=580.0, atr=5.8, regime_id=1, vol_surface=vs,
+            structure_type="iron_condor",
+        )
+        assert spec is not None
+        for od in spec.order_data:
+            assert od["instrument_type"] == "EQUITY_OPTION"
+
+    def test_default_trade_spec_fields_are_none(self) -> None:
+        """TradeSpec without new fields should default to None/empty."""
+        spec = TradeSpec(
+            ticker="SPY",
+            legs=[
+                LegSpec(role="short_put", action=LegAction.SELL_TO_OPEN,
+                        option_type="put", strike=570.0,
+                        strike_label="", expiration=date(2026, 3, 27),
+                        days_to_expiry=31, atm_iv_at_expiry=0.22),
+            ],
+            underlying_price=580.0,
+            target_dte=31,
+            target_expiration=date(2026, 3, 27),
+            spec_rationale="test",
+        )
+        assert spec.structure_type is None
+        assert spec.order_side is None
+        assert spec.profit_target_pct is None
+        assert spec.stop_loss_pct is None
+        assert spec.exit_dte is None
+        assert spec.exit_notes == []
+        assert spec.exit_summary == ""
+
 
 class TestNoGoNoTradeSpec:
     def test_iron_condor_no_go_no_spec(self) -> None:

@@ -625,9 +625,11 @@ sig.description           # str
 
 #### TradeSpec — Actionable Trade Parameters
 
-When verdict is GO or CAUTION, option play assessors (iron condor, iron butterfly, calendar, diagonal, ratio spread) include a `trade_spec` with concrete expiration dates, strikes, and leg codes. When NO_GO, `trade_spec` is `None`.
+Every assessor (option plays, setups, 0DTE, LEAP, earnings) includes a `trade_spec` when verdict is GO or CAUTION. `None` for NO_GO.
 
 ```python
+from market_analyzer import LegAction  # BTO, STO
+
 ic = ma.opportunity.assess_iron_condor("SPY")
 if ic.trade_spec:
     ts = ic.trade_spec
@@ -636,23 +638,31 @@ if ic.trade_spec:
     ts.target_dte             # 35
     ts.target_expiration      # date(2026, 3, 27)
 
-    # Legs — each with strike, expiration, role
+    # Legs — each with strike, expiration, role, action, quantity
     for leg in ts.legs:
         leg.role              # "short_put", "long_put", "short_call", "long_call"
+        leg.action            # LegAction.SELL_TO_OPEN or LegAction.BUY_TO_OPEN
+        leg.quantity          # 1 (default), 2 for ratio spread short leg
         leg.option_type       # "call" or "put"
         leg.strike            # 570.0 (snapped to standard tick)
         leg.strike_label      # "1.0 ATR OTM put"
         leg.expiration        # date(2026, 3, 27)
         leg.days_to_expiry    # 35
         leg.atm_iv_at_expiry  # 0.22
-        leg.short_code        # "570P 3/27"
+        leg.short_code        # "STO 1x 570P 3/27/26"
         leg.osi_symbol        # "260327P00570000"
 
-    # Human-readable short codes
-    ts.leg_codes              # ["SPY 570P 3/27", "SPY 565P 3/27", "SPY 590C 3/27", "SPY 595C 3/27"]
+    # Human-readable leg codes (with ticker, action, quantity)
+    ts.leg_codes              # ["STO 1x SPY P570 3/27/26", "BTO 1x SPY P565 3/27/26", ...]
 
     # Full OCC streamer symbols
     ts.streamer_symbols       # ["SPY   260327P00570000", ...]
+
+    # Machine-readable order data for cotrader
+    ts.order_data             # [{"action": "STO", "quantity": 1, "symbol": "SPY",
+                              #   "option_type": "put", "strike": 570.0,
+                              #   "expiration": "2026-03-27",
+                              #   "osi_symbol": "SPY   260327P00570000"}, ...]
 
     # Single-expiry structures (IC, IFly, ratio):
     ts.wing_width_points      # 5.0 (IC/IFly: distance between short and long strike)
@@ -669,6 +679,10 @@ if ic.trade_spec:
 
     ts.spec_rationale         # str — why these dates/strikes
 ```
+
+**LegAction enum**: `LegAction.BUY_TO_OPEN` ("BTO") / `LegAction.SELL_TO_OPEN` ("STO").
+
+**Quantity**: Default 1. Ratio spreads use `quantity=2` on the short leg (2 legs instead of 3).
 
 **Strike snapping rules**: <$50 -> $0.50 ticks, <$200 -> $1.00 ticks, >= $200 -> $5.00 ticks.
 
@@ -714,6 +728,17 @@ result.top_trades       # list[RankedEntry]
 result.by_ticker        # dict[str, list[RankedEntry]]
 result.by_strategy      # dict[StrategyType, list[RankedEntry]]
 result.black_swan_gate  # bool (True = CRITICAL, halt trading)
+
+# StrategyType enum (11 strategies):
+#   ZERO_DTE, LEAP, BREAKOUT, MOMENTUM,
+#   IRON_CONDOR, IRON_BUTTERFLY, CALENDAR, DIAGONAL, RATIO_SPREAD,
+#   EARNINGS, MEAN_REVERSION
+
+# Each RankedEntry now includes trade_spec:
+entry = result.top_trades[0]
+entry.trade_spec        # TradeSpec | None — concrete legs for the recommendation
+entry.trade_spec.leg_codes    # ["STO 1x SPY P570 3/27/26", ...]
+entry.trade_spec.order_data   # machine-readable dicts for cotrader
 ```
 
 ### Black Swan Alert — `ma.black_swan`

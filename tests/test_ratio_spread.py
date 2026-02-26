@@ -197,15 +197,17 @@ class TestRatioSpreadOutput:
         assert result.ratio_strategy == RatioSpreadStrategy.NO_TRADE
 
     def test_go_has_trade_spec(self) -> None:
-        """GO ratio spread should have a trade spec with 3 legs."""
+        """GO ratio spread should have a trade spec with 2 legs (short has quantity=2)."""
         result = assess_ratio_spread(
             "SPY", _regime(1, 0.80), _technicals(rsi=60),
             _vol_surface(front_iv=0.28, put_skew=0.06, call_skew=0.02),
             _phase(2),
         )
         if result.verdict != Verdict.NO_GO and result.trade_spec is not None:
-            assert len(result.trade_spec.legs) == 3
+            assert len(result.trade_spec.legs) == 2
             assert result.trade_spec.ticker == "SPY"
+            short_legs = [l for l in result.trade_spec.legs if l.action.value == "STO"]
+            assert short_legs[0].quantity == 2
 
     def test_no_go_has_no_trade_spec(self) -> None:
         result = assess_ratio_spread("SPY", _regime(4), _technicals(), _vol_surface())

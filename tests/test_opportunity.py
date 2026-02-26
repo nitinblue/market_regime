@@ -695,6 +695,237 @@ class TestSerialization:
         assert "fundamental_score" in d
 
 
+# =============================================================================
+# IRON MAN + ORB INTEGRATION TESTS
+# =============================================================================
+
+
+def _make_narrow_orb() -> ORBData:
+    """Narrow ORB range (<0.5%) — triggers Iron Man selection."""
+    from market_analyzer.models.technicals import ORBLevel
+    return ORBData(
+        ticker="TEST",
+        date=date(2026, 2, 22),
+        opening_minutes=30,
+        range_high=501.0,
+        range_low=499.0,
+        range_size=2.0,
+        range_pct=0.40,  # <0.5% → narrow
+        current_price=500.0,
+        status=ORBStatus("within"),
+        levels=[
+            ORBLevel(label="Midpoint", price=500.0, distance_pct=0.0),
+            ORBLevel(label="T1 Long (1.0x)", price=503.0, distance_pct=-0.6),
+            ORBLevel(label="T1 Short (1.0x)", price=497.0, distance_pct=0.6),
+            ORBLevel(label="T2 Long (1.5x)", price=504.0, distance_pct=-0.8),
+            ORBLevel(label="T2 Short (1.5x)", price=496.0, distance_pct=0.8),
+        ],
+        session_high=501.5,
+        session_low=498.5,
+        session_vwap=500.2,
+        opening_volume_ratio=1.4,
+        range_vs_daily_atr_pct=25.0,
+        breakout_bar_index=None,
+        retest_count=0,
+        signals=[],
+        description="Narrow ORB",
+    )
+
+
+def _make_orb_with_levels(status: str = "within", range_pct: float = 0.80) -> ORBData:
+    """ORB with extension levels for testing ORB integration."""
+    from market_analyzer.models.technicals import ORBLevel
+    return ORBData(
+        ticker="TEST",
+        date=date(2026, 2, 22),
+        opening_minutes=30,
+        range_high=502.0,
+        range_low=498.0,
+        range_size=4.0,
+        range_pct=range_pct,
+        current_price=501.0,
+        status=ORBStatus(status),
+        levels=[
+            ORBLevel(label="Midpoint", price=500.0, distance_pct=0.2),
+            ORBLevel(label="T1 Long (1.0x)", price=506.0, distance_pct=-1.0),
+            ORBLevel(label="T1 Short (1.0x)", price=494.0, distance_pct=1.4),
+            ORBLevel(label="T2 Long (1.5x)", price=508.0, distance_pct=-1.4),
+            ORBLevel(label="T2 Short (1.5x)", price=492.0, distance_pct=1.8),
+        ],
+        session_high=505.0,
+        session_low=496.0,
+        session_vwap=500.5,
+        opening_volume_ratio=1.3,
+        range_vs_daily_atr_pct=50.0,
+        breakout_bar_index=None,
+        retest_count=0,
+        signals=[],
+        description="ORB with levels",
+    )
+
+
+class TestIronManStrategy:
+    """Tests for Iron Man (inverse iron condor) strategy selection."""
+
+    def test_r1_narrow_orb_selects_iron_man(self):
+        result = assess_zero_dte(
+            "TEST", _make_regime(1), _make_technicals(), _make_macro(),
+            orb=_make_narrow_orb(),
+        )
+        assert result.zero_dte_strategy == ZeroDTEStrategy.IRON_MAN
+        assert "Iron Man" in result.strategy.name
+
+    def test_r2_narrow_orb_selects_iron_man(self):
+        result = assess_zero_dte(
+            "TEST", _make_regime(2), _make_technicals(), _make_macro(),
+            orb=_make_narrow_orb(),
+        )
+        assert result.zero_dte_strategy == ZeroDTEStrategy.IRON_MAN
+
+    def test_r3_narrow_orb_selects_iron_man(self):
+        result = assess_zero_dte(
+            "TEST", _make_regime(3, trend="bullish"), _make_technicals(), _make_macro(),
+            orb=_make_narrow_orb(),
+        )
+        assert result.zero_dte_strategy == ZeroDTEStrategy.IRON_MAN
+
+    def test_r1_normal_orb_selects_iron_condor(self):
+        """Normal-width ORB in R1 → standard iron condor (not iron man)."""
+        result = assess_zero_dte(
+            "TEST", _make_regime(1), _make_technicals(), _make_macro(),
+            orb=_make_orb_with_levels("within", range_pct=0.80),
+        )
+        assert result.zero_dte_strategy == ZeroDTEStrategy.IRON_CONDOR
+
+    def test_iron_man_strategy_rec_has_orb_range(self):
+        result = assess_zero_dte(
+            "TEST", _make_regime(1), _make_technicals(), _make_macro(),
+            orb=_make_narrow_orb(),
+        )
+        assert "499.00" in result.strategy.structure or "501.00" in result.strategy.structure
+        assert result.strategy.direction == "neutral"
+
+    def test_iron_man_risk_notes(self):
+        result = assess_zero_dte(
+            "TEST", _make_regime(1), _make_technicals(), _make_macro(),
+            orb=_make_narrow_orb(),
+        )
+        assert any("debit" in note.lower() for note in result.strategy.risk_notes)
+
+
+class TestORBDecision:
+    """Tests for ORB decision context on ZeroDTEOpportunity."""
+
+    def test_orb_decision_populated_when_orb_available(self):
+        result = assess_zero_dte(
+            "TEST", _make_regime(1), _make_technicals(), _make_macro(),
+            orb=_make_orb_with_levels("within"),
+        )
+        assert result.orb_decision is not None
+        assert result.orb_decision.status == "within"
+        assert result.orb_decision.range_high == 502.0
+        assert result.orb_decision.range_low == 498.0
+
+    def test_orb_decision_none_without_orb(self):
+        result = assess_zero_dte(
+            "TEST", _make_regime(1), _make_technicals(), _make_macro(),
+        )
+        assert result.orb_decision is None
+
+    def test_orb_decision_direction_bullish_on_breakout_long(self):
+        result = assess_zero_dte(
+            "TEST", _make_regime(1), _make_technicals(), _make_macro(),
+            orb=_make_orb_with_levels("breakout_long"),
+        )
+        assert result.orb_decision is not None
+        assert result.orb_decision.direction == "bullish"
+
+    def test_orb_decision_direction_bearish_on_breakout_short(self):
+        result = assess_zero_dte(
+            "TEST", _make_regime(1), _make_technicals(), _make_macro(),
+            orb=_make_orb_with_levels("breakout_short"),
+        )
+        assert result.orb_decision is not None
+        assert result.orb_decision.direction == "bearish"
+
+    def test_orb_decision_direction_bearish_on_failed_long(self):
+        result = assess_zero_dte(
+            "TEST", _make_regime(1), _make_technicals(), _make_macro(),
+            orb=_make_orb_with_levels("failed_long"),
+        )
+        assert result.orb_decision is not None
+        assert result.orb_decision.direction == "bearish"
+
+    def test_orb_decision_key_levels_has_vwap(self):
+        result = assess_zero_dte(
+            "TEST", _make_regime(1), _make_technicals(), _make_macro(),
+            orb=_make_orb_with_levels("within"),
+        )
+        assert "vwap" in result.orb_decision.key_levels
+        assert result.orb_decision.key_levels["vwap"] == 500.5
+
+    def test_orb_decision_key_levels_has_extensions(self):
+        result = assess_zero_dte(
+            "TEST", _make_regime(1), _make_technicals(), _make_macro(),
+            orb=_make_orb_with_levels("within"),
+        )
+        levels = result.orb_decision.key_levels
+        # Should have T1/T2 targets
+        has_t1 = any("t1" in k for k in levels)
+        assert has_t1
+
+    def test_orb_decision_narrow_range_suggests_iron_man(self):
+        result = assess_zero_dte(
+            "TEST", _make_regime(1), _make_technicals(), _make_macro(),
+            orb=_make_narrow_orb(),
+        )
+        assert "iron man" in result.orb_decision.decision.lower() or "inverse" in result.orb_decision.decision.lower()
+
+
+class TestORBIntegrationAllStrategies:
+    """Test ORB integration across all 0DTE strategies (user request: integrate ORB for any other ODTE)."""
+
+    def test_iron_condor_uses_orb_range_for_strikes(self):
+        """IC in R1 with ORB data → short strikes at ORB range edges."""
+        result = assess_zero_dte(
+            "TEST", _make_regime(1), _make_technicals(), _make_macro(),
+            orb=_make_orb_with_levels("within"),
+        )
+        assert result.zero_dte_strategy == ZeroDTEStrategy.IRON_CONDOR
+        assert result.strategy.structure is not None
+        # Strategy description should reference ORB levels
+        assert "ORB" in result.strategy.structure or "502" in result.strategy.structure or "498" in result.strategy.structure
+
+    def test_credit_spread_references_orb(self):
+        """Credit spread with ORB breakout → references ORB level in structure."""
+        result = assess_zero_dte(
+            "TEST", _make_regime(1), _make_technicals(), _make_macro(),
+            orb=_make_orb_with_levels("breakout_long"),
+        )
+        assert result.zero_dte_strategy == ZeroDTEStrategy.CREDIT_SPREAD
+        # Should reference ORB low as support
+        assert "ORB" in result.strategy.structure or "498" in result.strategy.structure
+
+    def test_directional_spread_references_orb_targets(self):
+        """Directional spread in R3 breakout → mentions ORB extension targets."""
+        result = assess_zero_dte(
+            "TEST", _make_regime(3, trend="bullish"), _make_technicals(), _make_macro(),
+            orb=_make_orb_with_levels("breakout_long"),
+        )
+        assert result.zero_dte_strategy == ZeroDTEStrategy.DIRECTIONAL_SPREAD
+        # Should mention T1 target in structure
+        assert "T1" in result.strategy.structure or "506" in result.strategy.structure
+
+    def test_summary_includes_orb_info(self):
+        """Summary should include ORB status and range when available."""
+        result = assess_zero_dte(
+            "TEST", _make_regime(1), _make_technicals(), _make_macro(),
+            orb=_make_orb_with_levels("within"),
+        )
+        if result.verdict != Verdict.NO_GO:
+            assert "ORB" in result.summary
+
+
 class TestConfig:
     def test_opportunity_settings_load(self):
         from market_analyzer.config import get_settings, reset_settings

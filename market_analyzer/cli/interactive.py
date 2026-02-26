@@ -355,6 +355,13 @@ class AnalyzerCLI(cmd.Cmd):
             if result.top_trades:
                 rows = []
                 for e in result.top_trades[:10]:
+                    legs_str = ""
+                    exit_str = ""
+                    if e.trade_spec is not None:
+                        legs_str = " | ".join(e.trade_spec.leg_codes[:2])
+                        if len(e.trade_spec.leg_codes) > 2:
+                            legs_str += " ..."
+                        exit_str = e.trade_spec.exit_summary
                     rows.append({
                         "#": e.rank,
                         "Ticker": e.ticker,
@@ -362,7 +369,8 @@ class AnalyzerCLI(cmd.Cmd):
                         "Verdict": e.verdict,
                         "Score": f"{e.composite_score:.2f}",
                         "Direction": e.direction,
-                        "Rationale": e.rationale[:50],
+                        "Legs": legs_str or "—",
+                        "Exit": exit_str or "—",
                     })
                 print()
                 print(tabulate(rows, headers="keys", tablefmt="simple", stralign="right"))
@@ -599,10 +607,7 @@ class AnalyzerCLI(cmd.Cmd):
                     elif s == "momentum":
                         result = ma.opportunity.assess_momentum(ticker)
                     elif s == "mean_reversion":
-                        from market_analyzer.opportunity.setups.mean_reversion import assess_mean_reversion as _mr
-                        regime = ma.regime.detect(ticker)
-                        technicals = ma.technicals.snapshot(ticker)
-                        result = _mr(ticker, regime, technicals)
+                        result = ma.opportunity.assess_mean_reversion(ticker)
                     elif s == "orb":
                         # ORB without intraday data → NO_GO (expected)
                         from market_analyzer.opportunity.setups.orb import assess_orb as _orb_assess
@@ -643,6 +648,18 @@ class AnalyzerCLI(cmd.Cmd):
                             desc = sig.description if isinstance(sig.description, str) else str(sig.description)
                             print(f"    {icon} {desc[:70]}")
 
+                    # Trade spec (actionable parameters)
+                    if hasattr(result, "trade_spec") and result.trade_spec is not None:
+                        ts = result.trade_spec
+                        if ts.structure_type:
+                            side_str = f" ({ts.order_side})" if ts.order_side else ""
+                            print(f"    Structure: {ts.structure_type}{side_str}")
+                        print(f"    Legs:")
+                        for code in ts.leg_codes:
+                            print(f"      {code}")
+                        if ts.exit_summary:
+                            print(f"    Exit:      {ts.exit_summary}")
+
                     print(f"    {_styled(result.summary, 'dim')}")
 
                 except Exception as exc:
@@ -652,12 +669,12 @@ class AnalyzerCLI(cmd.Cmd):
             print(f"{_styled('ERROR:', 'red')} {exc}")
 
     def do_opportunity(self, arg: str) -> None:
-        """Assess option play opportunities.\nUsage: opportunity SPY [play]\n  Plays: ic, ifly, calendar, diagonal, ratio, zero_dte, leap, all\n  Default: all"""
+        """Assess option play opportunities.\nUsage: opportunity SPY [play]\n  Plays: ic, ifly, calendar, diagonal, ratio, zero_dte, leap, earnings, all\n  Default: all"""
         parts = arg.strip().split()
         if not parts:
             print("Usage: opportunity TICKER [play]")
             print("  Plays: ic (iron condor), ifly (iron butterfly), calendar, diagonal,")
-            print("         ratio (ratio spread), zero_dte, leap, all (default)")
+            print("         ratio (ratio spread), zero_dte, leap, earnings, all (default)")
             return
 
         ticker = parts[0].upper()
@@ -677,11 +694,12 @@ class AnalyzerCLI(cmd.Cmd):
             "zero_dte": ["zero_dte"],
             "0dte": ["zero_dte"],
             "leap": ["leap"],
-            "all": ["iron_condor", "iron_butterfly", "calendar", "diagonal", "ratio_spread"],
+            "earnings": ["earnings"],
+            "all": ["iron_condor", "iron_butterfly", "calendar", "diagonal", "ratio_spread", "earnings"],
         }
         plays = play_map.get(play)
         if plays is None:
-            print(f"Unknown play: '{play}'. Use: ic, ifly, calendar, diagonal, ratio, zero_dte, leap, all")
+            print(f"Unknown play: '{play}'. Use: ic, ifly, calendar, diagonal, ratio, zero_dte, leap, earnings, all")
             return
 
         try:
@@ -714,9 +732,26 @@ class AnalyzerCLI(cmd.Cmd):
                     if hasattr(result, "wing_width_suggestion") and result.verdict != "no_go":
                         print(f"    Wings:     {result.wing_width_suggestion}")
 
+                    # ORB decision (0DTE with ORB data)
+                    if hasattr(result, "orb_decision") and result.orb_decision is not None:
+                        od = result.orb_decision
+                        print(f"    {_styled('ORB:', 'bold')}  {od.status} | {od.direction} | "
+                              f"Range {od.range_low:.2f}–{od.range_high:.2f} ({od.range_pct:.1f}%)")
+                        print(f"    ORB Decision: {od.decision[:100]}")
+                        # Show key levels
+                        level_strs = []
+                        for k, v in od.key_levels.items():
+                            if k not in ("range_high", "range_low"):
+                                level_strs.append(f"{k}={v:.2f}")
+                        if level_strs:
+                            print(f"    ORB Levels: {', '.join(level_strs[:6])}")
+
                     # Trade spec (actionable parameters)
                     if hasattr(result, "trade_spec") and result.trade_spec is not None:
                         ts = result.trade_spec
+                        if ts.structure_type:
+                            side_str = f" ({ts.order_side})" if ts.order_side else ""
+                            print(f"    Structure: {ts.structure_type}{side_str}")
                         print(f"    Expiry:    {ts.target_expiration} ({ts.target_dte}d)")
                         if ts.front_expiration and ts.back_expiration:
                             print(f"    Front:     {ts.front_expiration} ({ts.front_dte}d, IV {ts.iv_at_front:.1%})")
@@ -726,6 +761,12 @@ class AnalyzerCLI(cmd.Cmd):
                         print(f"    Legs:")
                         for code in ts.leg_codes:
                             print(f"      {code}")
+                        # Exit guidance
+                        if ts.exit_summary:
+                            print(f"    Exit:      {ts.exit_summary}")
+                        if ts.exit_notes:
+                            for note in ts.exit_notes[:3]:
+                                print(f"      - {note}")
 
                     # Ratio spread specific
                     if hasattr(result, "margin_warning") and result.margin_warning:

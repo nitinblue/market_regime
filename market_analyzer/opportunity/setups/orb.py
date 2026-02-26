@@ -19,6 +19,7 @@ from market_analyzer.config import get_settings
 from market_analyzer.models.opportunity import (
     HardStop,
     OpportunitySignal,
+    TradeSpec,
     Verdict,
 )
 from market_analyzer.models.regime import RegimeID
@@ -30,6 +31,7 @@ if TYPE_CHECKING:
     from market_analyzer.models.phase import PhaseResult
     from market_analyzer.models.regime import RegimeResult
     from market_analyzer.models.technicals import ORBData, TechnicalSnapshot
+    from market_analyzer.models.vol_surface import VolatilitySurface
 
 
 class ORBStrategy(StrEnum):
@@ -59,6 +61,7 @@ class ORBSetupOpportunity(BaseModel):
     opening_volume_ratio: float
     range_vs_daily_atr_pct: float | None
     regime_id: int
+    trade_spec: TradeSpec | None = None
     summary: str
 
 
@@ -70,6 +73,7 @@ def assess_orb(
     phase: PhaseResult | None = None,
     macro: MacroCalendar | None = None,
     fundamentals: FundamentalsSnapshot | None = None,
+    vol_surface: VolatilitySurface | None = None,
     as_of: date | None = None,
 ) -> ORBSetupOpportunity:
     """Assess ORB setup opportunity for a single instrument.
@@ -370,6 +374,16 @@ def assess_orb(
     else:
         verdict = Verdict.NO_GO
 
+    # --- Trade spec (0DTE structures for ORB) ---
+    trade_spec = None
+    if verdict != Verdict.NO_GO and strategy != ORBStrategy.NO_TRADE:
+        from market_analyzer.opportunity.option_plays._trade_spec_helpers import build_setup_trade_spec
+        trade_spec = build_setup_trade_spec(
+            ticker, technicals.current_price, technicals.atr,
+            direction, int(regime.regime), vol_surface,
+            target_dte_min=0, target_dte_max=1,
+        )
+
     # --- Summary ---
     summary_parts = [f"{verdict.upper()}: {ticker} ORB"]
     summary_parts.append(f"{orb.status.value.replace('_', ' ').title()}")
@@ -392,5 +406,6 @@ def assess_orb(
         opening_volume_ratio=orb.opening_volume_ratio,
         range_vs_daily_atr_pct=orb.range_vs_daily_atr_pct,
         regime_id=int(regime.regime),
+        trade_spec=trade_spec,
         summary=" | ".join(summary_parts),
     )

@@ -30,6 +30,7 @@ from market_analyzer.opportunity.option_plays._trade_spec_helpers import (
 
 if TYPE_CHECKING:
     from market_analyzer.models.vol_surface import VolatilitySurface
+    from market_analyzer.service.option_quotes import OptionQuoteService
 
 
 # Urgency by regime
@@ -43,6 +44,18 @@ _REGIME_URGENCY: dict[int, str] = {
 
 class AdjustmentService:
     """Analyzes open positions and ranks adjustment alternatives."""
+
+    def __init__(
+        self, quote_service: OptionQuoteService | None = None,
+    ) -> None:
+        self._quotes = quote_service
+
+    @property
+    def quote_source(self) -> str:
+        """Data source: broker name or 'Black-Scholes (estimated)'."""
+        if self._quotes and self._quotes.has_broker:
+            return f"{self._quotes.source} (real quotes)"
+        return "Black-Scholes (estimated)"
 
     def analyze(
         self,
@@ -194,7 +207,10 @@ class AdjustmentService:
     # ------------------------------------------------------------------
 
     def _estimate_pnl(self, trade_spec: TradeSpec, current_price: float) -> float:
-        """Estimate current P&L by repricing all legs at current price."""
+        """Estimate current P&L by repricing all legs at current price.
+
+        Uses real mid prices from broker when available, falls back to BS.
+        """
         remaining_dte = max(
             (trade_spec.target_expiration - date.today()).days, 1,
         )
@@ -204,13 +220,23 @@ class AdjustmentService:
         if entry_price is None:
             return 0.0
 
+        # Try real quotes first
+        quote_map = self._get_leg_quote_map(trade_spec)
+
         # Reprice at current underlying
         current_value = 0.0
         for leg in trade_spec.legs:
-            leg_price = _bs_price(
-                current_price, leg.strike, dte_years,
-                leg.atm_iv_at_expiry, leg.option_type,
-            )
+            leg_key = f"{leg.strike:.0f}{leg.option_type[0].upper()}"
+            quote = quote_map.get(leg_key)
+
+            if quote is not None:
+                leg_price = quote.mid
+            else:
+                leg_price = _bs_price(
+                    current_price, leg.strike, dte_years,
+                    leg.atm_iv_at_expiry, leg.option_type,
+                )
+
             if leg.action == LegAction.SELL_TO_OPEN:
                 current_value += leg_price * leg.quantity
             else:
@@ -222,6 +248,24 @@ class AdjustmentService:
         # For a credit trade: P&L = entry_credit - cost_to_close
         # cost_to_close = -current_value (flip sign: what we'd pay to unwind)
         return round(entry_price + current_value, 2)
+
+    def _get_leg_quote_map(self, trade_spec: TradeSpec) -> dict:
+        """Fetch real quotes for all legs if broker available.
+
+        Returns ``{leg_key: OptionQuote}`` or empty dict.
+        """
+        if not self._quotes or not self._quotes.has_broker:
+            return {}
+
+        try:
+            quotes = self._quotes.get_leg_quotes(trade_spec.legs, trade_spec.ticker)
+            result = {}
+            for q in quotes:
+                key = f"{q.strike:.0f}{q.option_type[0].upper()}"
+                result[key] = q
+            return result
+        except Exception:
+            return {}
 
     # ------------------------------------------------------------------
     # Adjustment generation

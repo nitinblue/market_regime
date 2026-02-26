@@ -87,6 +87,7 @@ from market_analyzer.service.entry import EntryService
 from market_analyzer.service.strategy import StrategyService
 from market_analyzer.service.exit import ExitService
 from market_analyzer.service.adjustment import AdjustmentService
+from market_analyzer.service.option_quotes import OptionQuoteService
 
 # Phase detection
 from market_analyzer.phases.detector import PhaseDetector
@@ -98,6 +99,16 @@ from market_analyzer.fundamentals.fetch import fetch_fundamentals
 # Macro
 from market_analyzer.models.macro import MacroCalendar, MacroEvent, MacroEventType
 from market_analyzer.macro.calendar import get_macro_calendar
+
+# Quotes (broker-agnostic)
+from market_analyzer.models.quotes import MarketMetrics, OptionQuote, QuoteSnapshot
+
+# Broker ABCs
+from market_analyzer.broker.base import (
+    BrokerSession,
+    MarketDataProvider,
+    MarketMetricsProvider,
+)
 
 # Vol surface
 from market_analyzer.models.vol_surface import (
@@ -118,7 +129,7 @@ from market_analyzer.models.trading_plan import (
 )
 from market_analyzer.macro.expiry import ExpiryEvent, ExpiryType
 from market_analyzer.service.trading_plan import TradingPlanService
-from market_analyzer.config import TradingPlanSettings
+from market_analyzer.config import BrokerSettings, TradingPlanSettings
 
 # Opportunity assessment
 from market_analyzer.models.levels import (
@@ -376,6 +387,17 @@ __all__ = [
     "ExpiryType",
     "TradingPlanService",
     "TradingPlanSettings",
+    # Quotes (broker-agnostic)
+    "OptionQuote",
+    "QuoteSnapshot",
+    "MarketMetrics",
+    "OptionQuoteService",
+    # Broker ABCs
+    "BrokerSession",
+    "MarketDataProvider",
+    "MarketMetricsProvider",
+    # Config
+    "BrokerSettings",
     # Functions
     "compute_features",
     "compute_technicals",

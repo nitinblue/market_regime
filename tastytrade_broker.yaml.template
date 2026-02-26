@@ -1,0 +1,23 @@
+# TastyTrade broker credentials template
+# Copy to tastytrade_broker.yaml and fill in values.
+# Values starting with $ are resolved from environment variables.
+#
+# Credential locations searched (in order):
+#   1. ./tastytrade_broker.yaml
+#   2. ~/.market_analyzer/tastytrade_broker.yaml
+#   3. Relative to broker package directory
+
+broker:
+  live:
+    client_secret: ${TT_LIVE_SECRET}
+    refresh_token: ${TT_LIVE_TOKEN}
+  paper:
+    client_secret: ${TT_PAPER_SECRET}
+    refresh_token: ${TT_PAPER_TOKEN}
+  # Optional: separate credentials for DXLink market data streaming.
+  # If omitted, live credentials are used for DXLink.
+  # Paper environment does NOT support streaming, so DXLink always
+  # uses a live session regardless of trading mode.
+  # data:
+  #   client_secret: ${TT_LIVE_SECRET}
+  #   refresh_token: ${TT_LIVE_TOKEN}

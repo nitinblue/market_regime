@@ -22,9 +22,11 @@ from market_analyzer.service.strategy import StrategyService
 from market_analyzer.service.exit import ExitService
 from market_analyzer.service.vol_surface import VolSurfaceService
 from market_analyzer.service.adjustment import AdjustmentService
+from market_analyzer.service.option_quotes import OptionQuoteService
 from market_analyzer.service.trading_plan import TradingPlanService
 
 if TYPE_CHECKING:
+    from market_analyzer.broker.base import MarketDataProvider, MarketMetricsProvider
     from market_analyzer.data.service import DataService
 
 
@@ -60,6 +62,8 @@ class MarketAnalyzer:
         data_service: DataService | None = None,
         config: RegimeConfig = RegimeConfig(),
         market: str | None = None,
+        market_data: MarketDataProvider | None = None,
+        market_metrics: MarketMetricsProvider | None = None,
     ) -> None:
         self.data = data_service
 
@@ -126,5 +130,10 @@ class MarketAnalyzer:
             levels_service=self.levels,
             regime_service=self.regime,
         )
-        self.adjustment = AdjustmentService()
+        self.quotes = OptionQuoteService(
+            market_data=market_data,
+            metrics=market_metrics,
+            data_service=data_service,
+        )
+        self.adjustment = AdjustmentService(quote_service=self.quotes)
         self.plan = TradingPlanService(analyzer=self)

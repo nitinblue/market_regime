@@ -38,6 +38,7 @@ Thumbs.db
 .env
 .env.*
 credentials.json
+tastytrade_broker.yaml
 
 # Workspace files
 *.code-workspace

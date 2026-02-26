@@ -492,6 +492,14 @@ class ExitSettings(BaseModel):
     regime_change_review: bool = True       # Review on regime change
 
 
+class BrokerSettings(BaseModel):
+    """Settings for broker integration."""
+
+    credentials_path: str = "tastytrade_broker.yaml"
+    is_paper: bool = False
+    auto_connect: bool = False  # Don't connect unless explicitly asked
+
+
 class TradingPlanSettings(BaseModel):
     """Settings for daily trading plan generation."""
 
@@ -529,6 +537,7 @@ class Settings(BaseModel):
     strategy: StrategySettings = Field(default_factory=StrategySettings)
     exit: ExitSettings = Field(default_factory=ExitSettings)
     trading_plan: TradingPlanSettings = Field(default_factory=TradingPlanSettings)
+    broker: BrokerSettings = Field(default_factory=BrokerSettings)
 
 
 # --- Loading ---

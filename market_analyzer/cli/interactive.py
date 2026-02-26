@@ -1016,6 +1016,11 @@ class AnalyzerCLI(cmd.Cmd):
             # Display
             _print_header(f"{ticker} — Trade Adjustment Analysis")
 
+            # Data source
+            src = ma.adjustment.quote_source
+            src_style = "green" if "real" in src else "dim"
+            print(f"\n  {_styled('Source:', 'dim')} {_styled(src, src_style)}")
+
             # Position summary
             short_puts = [l for l in trade.legs
                           if l.option_type == "put" and l.action == LegAction.SELL_TO_OPEN]
@@ -1078,6 +1083,96 @@ class AnalyzerCLI(cmd.Cmd):
 
         except Exception as exc:
             print(f"{_styled('ERROR:', 'red')} {exc}")
+
+    def do_quotes(self, arg: str) -> None:
+        """Show option chain quotes for a ticker.\nUsage: quotes TICKER [EXPIRATION]"""
+        parts = arg.strip().split()
+        if not parts:
+            print("Usage: quotes TICKER [YYYY-MM-DD]")
+            return
+        ticker = parts[0].upper()
+
+        expiration = None
+        if len(parts) > 1:
+            try:
+                expiration = date.fromisoformat(parts[1])
+            except ValueError:
+                print(f"Invalid date: {parts[1]} (use YYYY-MM-DD)")
+                return
+
+        try:
+            ma = self._get_ma()
+            snap = ma.quotes.get_chain(ticker, expiration)
+
+            _print_header(f"{ticker} Option Chain — Source: {snap.source}")
+            if not snap.quotes:
+                print(f"\n  No quotes available for {ticker}")
+                return
+
+            print(f"\n  Underlying: ${snap.underlying_price:.2f}")
+
+            # Market metrics if available
+            metrics = ma.quotes.get_metrics(ticker)
+            if metrics:
+                parts_m = []
+                if metrics.iv_rank is not None:
+                    parts_m.append(f"IV Rank: {metrics.iv_rank:.1f}")
+                if metrics.iv_percentile is not None:
+                    parts_m.append(f"IV Pctl: {metrics.iv_percentile:.1f}")
+                if metrics.beta is not None:
+                    parts_m.append(f"Beta: {metrics.beta:.2f}")
+                if metrics.liquidity_rating is not None:
+                    parts_m.append(f"Liq: {metrics.liquidity_rating:.1f}")
+                if parts_m:
+                    print(f"  {' | '.join(parts_m)}")
+
+            # Group by expiration
+            from collections import defaultdict
+            by_exp: dict[date, list] = defaultdict(list)
+            for q in snap.quotes:
+                by_exp[q.expiration].append(q)
+
+            for exp_date in sorted(by_exp.keys()):
+                qs = by_exp[exp_date]
+                dte = (exp_date - date.today()).days
+                print(f"\n  {_styled(f'Expiration: {exp_date} ({dte} DTE)', 'bold')}")
+
+                # Show puts and calls around ATM
+                calls = sorted([q for q in qs if q.option_type == "call"], key=lambda q: q.strike)
+                puts = sorted([q for q in qs if q.option_type == "put"], key=lambda q: q.strike)
+
+                # Filter to near-ATM strikes (within ~10% of price)
+                if snap.underlying_price > 0:
+                    lo = snap.underlying_price * 0.90
+                    hi = snap.underlying_price * 1.10
+                    calls = [q for q in calls if lo <= q.strike <= hi]
+                    puts = [q for q in puts if lo <= q.strike <= hi]
+
+                has_greeks = any(q.delta is not None for q in calls + puts)
+
+                # Header
+                if has_greeks:
+                    hdr = f"  {'Strike':>8}  {'Type':>5}  {'Bid':>7}  {'Ask':>7}  {'Mid':>7}  {'IV':>7}  {'Delta':>7}  {'Theta':>7}"
+                else:
+                    hdr = f"  {'Strike':>8}  {'Type':>5}  {'Bid':>7}  {'Ask':>7}  {'Mid':>7}  {'IV':>7}  {'Vol':>7}  {'OI':>7}"
+                print(_styled(hdr, 'dim'))
+
+                for q in puts + calls:
+                    iv_str = f"{q.implied_volatility:.2%}" if q.implied_volatility else "  —"
+                    if has_greeks:
+                        d_str = f"{q.delta:>7.3f}" if q.delta is not None else "    —"
+                        t_str = f"{q.theta:>7.3f}" if q.theta is not None else "    —"
+                        print(f"  {q.strike:>8.0f}  {q.option_type:>5}  {q.bid:>7.2f}  {q.ask:>7.2f}  {q.mid:>7.2f}  {iv_str:>7}  {d_str}  {t_str}")
+                    else:
+                        print(f"  {q.strike:>8.0f}  {q.option_type:>5}  {q.bid:>7.2f}  {q.ask:>7.2f}  {q.mid:>7.2f}  {iv_str:>7}  {q.volume:>7}  {q.open_interest:>7}")
+
+                # Limit output
+                if len(by_exp) > 3 and exp_date != sorted(by_exp.keys())[0]:
+                    break  # Only show first expiration in detail if many
+
+        except Exception as exc:
+            print(f"{_styled('ERROR:', 'red')} {exc}")
+            traceback.print_exc()
 
     def do_quit(self, arg: str) -> bool:
         """Exit the REPL."""

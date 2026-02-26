@@ -5,6 +5,7 @@ Pure functions — no data fetching, no side effects.
 
 from __future__ import annotations
 
+import math
 from datetime import date
 
 from market_analyzer.models.opportunity import LegAction, LegSpec, OrderSide, StructureType, TradeSpec
@@ -871,3 +872,95 @@ def build_setup_trade_spec(
                     "Target 50% of max profit",
                     "Close at 50% loss of debit paid"],
     )
+
+
+# --- Fill price estimation (rough Black-Scholes approximation) ---
+
+
+def _bs_price(
+    underlying: float,
+    strike: float,
+    dte_years: float,
+    iv: float,
+    option_type: str,
+) -> float:
+    """Rough Black-Scholes option price (no dividends, risk-free ~0).
+
+    Good enough for fill-price cutoff estimation — cotrader has real bid/ask.
+    """
+    if dte_years <= 0 or iv <= 0:
+        # Intrinsic only
+        if option_type == "call":
+            return max(underlying - strike, 0.0)
+        return max(strike - underlying, 0.0)
+
+    sqrt_t = math.sqrt(dte_years)
+    d1 = (math.log(underlying / strike) + 0.5 * iv * iv * dte_years) / (iv * sqrt_t)
+    d2 = d1 - iv * sqrt_t
+
+    nd1 = _norm_cdf(d1)
+    nd2 = _norm_cdf(d2)
+
+    if option_type == "call":
+        return underlying * nd1 - strike * nd2
+    else:
+        return strike * _norm_cdf(-d2) - underlying * _norm_cdf(-d1)
+
+
+def _norm_cdf(x: float) -> float:
+    """Standard normal CDF approximation (Abramowitz & Stegun)."""
+    return 0.5 * (1.0 + math.erf(x / math.sqrt(2.0)))
+
+
+def estimate_trade_price(trade_spec: TradeSpec) -> float | None:
+    """Rough BS-estimated net price for the trade.
+
+    Returns positive for net credit, negative for net debit.
+    Returns None if estimation is not possible.
+    """
+    if not trade_spec.legs:
+        return None
+
+    total = 0.0
+    for leg in trade_spec.legs:
+        dte_years = max(leg.days_to_expiry, 1) / 365.0
+        price = _bs_price(
+            trade_spec.underlying_price,
+            leg.strike,
+            dte_years,
+            leg.atm_iv_at_expiry,
+            leg.option_type,
+        )
+        # STO adds credit (positive), BTO costs money (negative)
+        if leg.action == LegAction.SELL_TO_OPEN:
+            total += price * leg.quantity
+        else:
+            total -= price * leg.quantity
+
+    return round(total, 2)
+
+
+def compute_max_entry_price(trade_spec: TradeSpec, slippage_pct: float = 0.20) -> float | None:
+    """Max price cotrader should pay/accept. Returns absolute value.
+
+    For credits: max_entry = estimated_credit * (1 - slippage_pct)
+        → don't accept less than (1 - slippage) of theoretical credit
+    For debits: max_entry = |estimated_debit| * (1 + slippage_pct)
+        → don't pay more than (1 + slippage) of theoretical debit
+    For long options: tighter tolerance (slippage_pct * 0.75).
+    """
+    estimated = estimate_trade_price(trade_spec)
+    if estimated is None:
+        return None
+
+    st = trade_spec.structure_type
+    if estimated > 0:
+        # Net credit structure — don't accept less than X% of theoretical
+        return round(estimated * (1.0 - slippage_pct), 2)
+    elif estimated < 0:
+        debit = abs(estimated)
+        if st and st in (StructureType.LONG_OPTION,):
+            # Tighter tolerance for single options
+            return round(debit * (1.0 + slippage_pct * 0.75), 2)
+        return round(debit * (1.0 + slippage_pct), 2)
+    return None

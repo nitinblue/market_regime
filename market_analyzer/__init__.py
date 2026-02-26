@@ -100,6 +100,18 @@ from market_analyzer.models.vol_surface import (
 from market_analyzer.service.vol_surface import VolSurfaceService
 from market_analyzer.features.vol_surface import compute_vol_surface
 
+# Trading plan
+from market_analyzer.models.trading_plan import (
+    DailyTradingPlan,
+    DayVerdict,
+    PlanHorizon,
+    PlanTrade,
+    RiskBudget,
+)
+from market_analyzer.macro.expiry import ExpiryEvent, ExpiryType
+from market_analyzer.service.trading_plan import TradingPlanService
+from market_analyzer.config import TradingPlanSettings
+
 # Opportunity assessment
 from market_analyzer.models.levels import (
     LevelRole,
@@ -118,11 +130,14 @@ from market_analyzer.models.opportunity import (
     MomentumOpportunity,
     ORBDecision,
     OrderSide,
+    RiskProfile,
+    StructureProfile,
     StructureType,
     TradeSpec,
     Verdict,
     ZeroDTEOpportunity,
     ZeroDTEStrategy,
+    get_structure_profile,
 )
 from market_analyzer.opportunity.option_plays.earnings import EarningsOpportunity
 from market_analyzer.opportunity.setups.mean_reversion import MeanReversionOpportunity
@@ -288,6 +303,9 @@ __all__ = [
     "OrderSide",
     "TradeSpec",
     "Verdict",
+    "RiskProfile",
+    "StructureProfile",
+    "get_structure_profile",
     "EarningsOpportunity",
     "MeanReversionOpportunity",
     "ZeroDTEOpportunity",
@@ -333,6 +351,16 @@ __all__ = [
     "RankedEntry",
     "TradeRankingResult",
     "RankingFeedback",
+    # Trading plan
+    "DailyTradingPlan",
+    "DayVerdict",
+    "PlanHorizon",
+    "PlanTrade",
+    "RiskBudget",
+    "ExpiryEvent",
+    "ExpiryType",
+    "TradingPlanService",
+    "TradingPlanSettings",
     # Functions
     "compute_features",
     "compute_technicals",

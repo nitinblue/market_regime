@@ -492,6 +492,19 @@ class ExitSettings(BaseModel):
     regime_change_review: bool = True       # Review on regime change
 
 
+class TradingPlanSettings(BaseModel):
+    """Settings for daily trading plan generation."""
+
+    default_tickers: list[str] = Field(default_factory=lambda: ["SPY", "QQQ", "GLD", "TLT", "IWM"])
+    max_trades_per_plan: int = 10
+    daily_risk_pct: float = 0.02            # 2% of account per day
+    max_new_positions_normal: int = 3
+    max_new_positions_light: int = 1
+    fill_slippage_pct: float = 0.20         # 20% slippage tolerance for cutoff
+    include_0dte: bool = True
+    include_leaps: bool = True
+
+
 class Settings(BaseModel):
     """Central config — loaded from YAML, overridable per-field."""
 
@@ -515,6 +528,7 @@ class Settings(BaseModel):
     screening: ScreeningSettings = Field(default_factory=ScreeningSettings)
     strategy: StrategySettings = Field(default_factory=StrategySettings)
     exit: ExitSettings = Field(default_factory=ExitSettings)
+    trading_plan: TradingPlanSettings = Field(default_factory=TradingPlanSettings)
 
 
 # --- Loading ---

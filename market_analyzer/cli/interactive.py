@@ -39,6 +39,20 @@ def _print_header(title: str) -> None:
     print(f"{_styled('=' * 60, 'dim')}")
 
 
+def _profile_tag(structure_type: str | None, order_side: str | None = None,
+                 direction: str | None = None) -> str:
+    """Format a compact profile tag: '/‾‾\\ neutral · defined'."""
+    if not structure_type:
+        return ""
+    from market_analyzer.models.opportunity import get_structure_profile, RiskProfile
+    p = get_structure_profile(structure_type, order_side, direction)
+    risk_str = (
+        _styled("UNDEFINED", "red") if p.risk_profile == RiskProfile.UNDEFINED
+        else _styled("defined", "green")
+    )
+    return f"{p.payoff_graph} {p.bias} · {risk_str}"
+
+
 class AnalyzerCLI(cmd.Cmd):
     """Interactive REPL for market analysis."""
 
@@ -353,22 +367,35 @@ class AnalyzerCLI(cmd.Cmd):
                 print(f"\n  {_styled('TRADING HALTED — Black Swan CRITICAL', 'red')}")
 
             if result.top_trades:
+                from market_analyzer.models.opportunity import get_structure_profile, RiskProfile
                 rows = []
                 for e in result.top_trades[:10]:
                     legs_str = ""
                     exit_str = ""
+                    graph = ""
+                    risk = ""
                     if e.trade_spec is not None:
                         legs_str = " | ".join(e.trade_spec.leg_codes[:2])
                         if len(e.trade_spec.leg_codes) > 2:
                             legs_str += " ..."
                         exit_str = e.trade_spec.exit_summary
+                        if e.trade_spec.structure_type:
+                            p = get_structure_profile(
+                                e.trade_spec.structure_type,
+                                e.trade_spec.order_side,
+                                e.direction,
+                            )
+                            graph = p.payoff_graph
+                            risk = p.risk_profile.value.upper() if p.risk_profile == RiskProfile.UNDEFINED else p.risk_profile.value
                     rows.append({
                         "#": e.rank,
                         "Ticker": e.ticker,
                         "Strategy": e.strategy_type,
+                        "Payoff": graph or "—",
+                        "Bias": e.direction,
+                        "Risk": risk or "—",
                         "Verdict": e.verdict,
                         "Score": f"{e.composite_score:.2f}",
-                        "Direction": e.direction,
                         "Legs": legs_str or "—",
                         "Exit": exit_str or "—",
                     })
@@ -379,6 +406,122 @@ class AnalyzerCLI(cmd.Cmd):
 
         except Exception as exc:
             print(f"{_styled('ERROR:', 'red')} {exc}")
+
+    def do_plan(self, arg: str) -> None:
+        """Generate daily trading plan.\nUsage: plan [TICKER ...] [--date YYYY-MM-DD]"""
+        parts = arg.strip().split()
+        tickers: list[str] = []
+        plan_date = None
+
+        i = 0
+        while i < len(parts):
+            if parts[i] == "--date" and i + 1 < len(parts):
+                try:
+                    plan_date = date.fromisoformat(parts[i + 1])
+                except ValueError:
+                    print(f"Invalid date: {parts[i + 1]}")
+                    return
+                i += 2
+            else:
+                tickers.append(parts[i].upper())
+                i += 1
+
+        try:
+            ma = self._get_ma()
+            plan = ma.plan.generate(
+                tickers=tickers or None,
+                plan_date=plan_date,
+            )
+
+            # Header
+            day_str = plan.plan_for_date.strftime("%a %b %d, %Y")
+            _print_header(f"Daily Trading Plan — {day_str}")
+
+            # Day verdict
+            verdict_color = {
+                "trade": "green", "trade_light": "yellow",
+                "avoid": "red", "no_trade": "red",
+            }
+            vc = verdict_color.get(plan.day_verdict, "")
+            print(f"\n  Day: {_styled(plan.day_verdict.value.upper().replace('_', ' '), vc)}")
+            if plan.day_verdict_reasons:
+                for r in plan.day_verdict_reasons:
+                    print(f"       {_styled(r, 'dim')}")
+
+            # Risk budget
+            b = plan.risk_budget
+            print(f"  Risk: max {b.max_new_positions} new positions | "
+                  f"${b.max_daily_risk_dollars:,.0f} daily risk budget | "
+                  f"sizing {b.position_size_factor:.0%}")
+
+            # Expiry events
+            if plan.expiry_events:
+                labels = [f"{e.label} ({e.date})" for e in plan.expiry_events]
+                print(f"  Expiry: {', '.join(labels)}")
+            if plan.upcoming_expiries:
+                future = [e for e in plan.upcoming_expiries if e.date > plan.plan_for_date]
+                if future:
+                    nxt = future[0]
+                    print(f"  Next: {nxt.label} ({nxt.date})")
+
+            if not plan.all_trades:
+                print(f"\n  {_styled('No actionable trades.', 'dim')}")
+            else:
+                # Group by horizon
+                from market_analyzer.models.trading_plan import PlanHorizon
+                horizon_labels = {
+                    PlanHorizon.ZERO_DTE: "0DTE",
+                    PlanHorizon.WEEKLY: "Weekly",
+                    PlanHorizon.MONTHLY: "Monthly",
+                    PlanHorizon.LEAP: "LEAP",
+                }
+                for h in PlanHorizon:
+                    trades = plan.trades_by_horizon.get(h, [])
+                    if not trades:
+                        continue
+                    print(f"\n  {_styled(f'--- {horizon_labels[h]} ({len(trades)} trades) ---', 'bold')}")
+                    for t in trades:
+                        v_color = {"go": "green", "caution": "yellow"}.get(t.verdict, "")
+                        v_text = _styled(t.verdict.value.upper(), v_color)
+
+                        legs_str = ""
+                        exit_str = ""
+                        st_type = None
+                        side = None
+                        if t.trade_spec is not None:
+                            legs_str = " | ".join(t.trade_spec.leg_codes)
+                            exit_str = t.trade_spec.exit_summary
+                            st_type = t.trade_spec.structure_type
+                            side = t.trade_spec.order_side
+
+                        tag = _profile_tag(st_type, side, t.direction)
+                        print(f"  #{t.rank} {_styled(t.ticker, 'bold')}  {t.strategy_type}  "
+                              f"{v_text}  {t.composite_score:.2f}")
+                        if tag:
+                            print(f"     {tag}")
+                        if legs_str:
+                            print(f"     {legs_str}")
+                        # Max profit / max loss
+                        if t.trade_spec:
+                            mp = t.trade_spec.max_profit_desc or ""
+                            ml = t.trade_spec.max_loss_desc or ""
+                            if mp or ml:
+                                print(f"     Max profit: {mp} | Max loss: {ml}")
+                            if exit_str:
+                                print(f"     {exit_str}")
+                        # Chase limit
+                        if t.max_entry_price is not None:
+                            print(f"     Chase limit: ${t.max_entry_price:.2f}")
+                        # Expiry note
+                        if t.expiry_note:
+                            print(f"     {_styled(f'NOTE: {t.expiry_note}', 'yellow')}")
+
+            print(f"\n  {_styled(plan.summary, 'dim')}")
+
+        except Exception as exc:
+            print(f"{_styled('ERROR:', 'red')} {exc}")
+            if "--debug" in arg:
+                traceback.print_exc()
 
     def do_regime(self, arg: str) -> None:
         """Detect regime for ticker(s).\nUsage: regime SPY GLD"""
@@ -651,9 +794,12 @@ class AnalyzerCLI(cmd.Cmd):
                     # Trade spec (actionable parameters)
                     if hasattr(result, "trade_spec") and result.trade_spec is not None:
                         ts = result.trade_spec
+                        direction = getattr(result, "direction", None)
+                        if direction is None and hasattr(result, "strategy") and hasattr(result.strategy, "direction"):
+                            direction = result.strategy.direction
                         if ts.structure_type:
-                            side_str = f" ({ts.order_side})" if ts.order_side else ""
-                            print(f"    Structure: {ts.structure_type}{side_str}")
+                            tag = _profile_tag(ts.structure_type, ts.order_side, direction)
+                            print(f"    {tag}")
                         print(f"    Legs:")
                         for code in ts.leg_codes:
                             print(f"      {code}")
@@ -749,9 +895,12 @@ class AnalyzerCLI(cmd.Cmd):
                     # Trade spec (actionable parameters)
                     if hasattr(result, "trade_spec") and result.trade_spec is not None:
                         ts = result.trade_spec
+                        direction = getattr(result, "direction", None)
+                        if direction is None and hasattr(result, "strategy") and hasattr(result.strategy, "direction"):
+                            direction = result.strategy.direction
                         if ts.structure_type:
-                            side_str = f" ({ts.order_side})" if ts.order_side else ""
-                            print(f"    Structure: {ts.structure_type}{side_str}")
+                            tag = _profile_tag(ts.structure_type, ts.order_side, direction)
+                            print(f"    {tag}")
                         print(f"    Expiry:    {ts.target_expiration} ({ts.target_dte}d)")
                         if ts.front_expiration and ts.back_expiration:
                             print(f"    Front:     {ts.front_expiration} ({ts.front_dte}d, IV {ts.iv_at_front:.1%})")

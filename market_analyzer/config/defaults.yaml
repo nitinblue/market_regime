@@ -401,3 +401,13 @@ exit:
   time_exit_dte: 7
   theta_decay_exit_pct: 50.0
   regime_change_review: true
+
+trading_plan:
+  default_tickers: ["SPY", "QQQ", "GLD", "TLT", "IWM"]
+  max_trades_per_plan: 10
+  daily_risk_pct: 0.02
+  max_new_positions_normal: 3
+  max_new_positions_light: 1
+  fill_slippage_pct: 0.20
+  include_0dte: true
+  include_leaps: true

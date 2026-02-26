@@ -47,6 +47,115 @@ class Verdict(StrEnum):
     NO_GO = "no_go"
 
 
+class RiskProfile(StrEnum):
+    """Whether the strategy has a defined maximum loss."""
+
+    DEFINED = "defined"
+    UNDEFINED = "undefined"
+
+
+class StructureProfile(BaseModel):
+    """Quick-reference profile for an option structure.
+
+    Shown in CLI next to every trade so the user instantly knows:
+    what the payoff looks like, which direction it bets on, and
+    whether they can lose more than they put in.
+    """
+
+    payoff_graph: str   # Compact ASCII payoff shape (5-7 chars)
+    bias: str           # "neutral", "bullish", "bearish"
+    risk_profile: RiskProfile
+    label: str          # One-liner: "4-leg neutral credit · defined risk"
+
+
+# Payoff graph + profile lookup.
+# For direction-sensitive structures (spreads, long options), caller
+# provides direction; default is "neutral".  For order-side-sensitive
+# structures (straddle/strangle), caller provides order_side.
+
+_PROFILES: dict[str, tuple[str, str, RiskProfile, str]] = {
+    # (payoff_graph, default_bias, risk, label)
+    "iron_condor":     ("/‾‾\\",  "neutral",  RiskProfile.DEFINED,   "4-leg neutral credit · defined risk"),
+    "iron_man":        ("\\__/",  "neutral",  RiskProfile.DEFINED,   "4-leg neutral debit · defined risk"),
+    "iron_butterfly":  ("/\\",    "neutral",  RiskProfile.DEFINED,   "4-leg ATM straddle + wings · defined risk"),
+    "calendar":        ("/\\",    "neutral",  RiskProfile.DEFINED,   "2-leg time spread · defined risk"),
+    "diagonal":        ("_/\\",   "neutral",  RiskProfile.DEFINED,   "2-leg time+strike spread · defined risk"),
+    "pmcc":            ("_/\\",   "bullish",  RiskProfile.DEFINED,   "poor man's covered call · defined risk"),
+}
+
+# Direction-dependent structures
+_SPREAD_PROFILES: dict[tuple[str, str], tuple[str, str, RiskProfile, str]] = {
+    # (structure, direction): (graph, bias, risk, label)
+    ("credit_spread", "bullish"):  ("__/‾",  "bullish",  RiskProfile.DEFINED,  "bull put credit spread · defined risk"),
+    ("credit_spread", "bearish"):  ("‾\\__",  "bearish",  RiskProfile.DEFINED,  "bear call credit spread · defined risk"),
+    ("credit_spread", "neutral"):  ("__/‾",  "neutral",  RiskProfile.DEFINED,  "credit spread · defined risk"),
+    ("debit_spread", "bullish"):   ("__/‾",  "bullish",  RiskProfile.DEFINED,  "bull call debit spread · defined risk"),
+    ("debit_spread", "bearish"):   ("‾\\__",  "bearish",  RiskProfile.DEFINED,  "bear put debit spread · defined risk"),
+    ("debit_spread", "neutral"):   ("__/‾",  "neutral",  RiskProfile.DEFINED,  "debit spread · defined risk"),
+    ("ratio_spread", "bullish"):   ("_/\\!",  "bullish",  RiskProfile.UNDEFINED, "call ratio spread · UNDEFINED risk"),
+    ("ratio_spread", "bearish"):   ("!\\/\\_", "bearish",  RiskProfile.UNDEFINED, "put ratio spread · UNDEFINED risk"),
+    ("ratio_spread", "neutral"):   ("_/\\!",  "neutral",  RiskProfile.UNDEFINED, "ratio spread · UNDEFINED risk"),
+    ("long_option", "bullish"):    ("__/",   "bullish",  RiskProfile.DEFINED,  "long call · defined risk"),
+    ("long_option", "bearish"):    ("\\__",   "bearish",  RiskProfile.DEFINED,  "long put · defined risk"),
+    ("long_option", "neutral"):    ("__/",   "neutral",  RiskProfile.DEFINED,  "long option · defined risk"),
+}
+
+# Order-side-dependent structures (straddle, strangle)
+_VOL_PROFILES: dict[tuple[str, str], tuple[str, str, RiskProfile, str]] = {
+    # (structure, order_side): (graph, bias, risk, label)
+    ("straddle", "credit"):   ("/\\",    "neutral", RiskProfile.UNDEFINED, "short straddle · UNDEFINED risk"),
+    ("straddle", "debit"):    ("\\/",    "neutral", RiskProfile.DEFINED,   "long straddle · defined risk"),
+    ("strangle", "credit"):   ("/‾\\",   "neutral", RiskProfile.UNDEFINED, "short strangle · UNDEFINED risk"),
+    ("strangle", "debit"):    ("\\__/",  "neutral", RiskProfile.DEFINED,   "long strangle · defined risk"),
+}
+
+
+def get_structure_profile(
+    structure_type: str | StructureType,
+    order_side: str | OrderSide | None = None,
+    direction: str | None = None,
+) -> StructureProfile:
+    """Look up the payoff profile for a structure.
+
+    Args:
+        structure_type: The option structure (from StructureType enum).
+        order_side: "credit" or "debit" — needed for straddle/strangle.
+        direction: "bullish", "bearish", or "neutral" — needed for spreads.
+
+    Returns:
+        StructureProfile with payoff_graph, bias, risk_profile, label.
+    """
+    st = str(structure_type)
+    side = str(order_side) if order_side else None
+    dir_ = direction or "neutral"
+
+    # Check vol structures first (straddle/strangle depend on buy/sell)
+    if st in ("straddle", "strangle") and side:
+        key = (st, side)
+        if key in _VOL_PROFILES:
+            g, b, r, l = _VOL_PROFILES[key]
+            return StructureProfile(payoff_graph=g, bias=b, risk_profile=r, label=l)
+
+    # Check direction-dependent structures
+    key_dir = (st, dir_)
+    if key_dir in _SPREAD_PROFILES:
+        g, b, r, l = _SPREAD_PROFILES[key_dir]
+        return StructureProfile(payoff_graph=g, bias=b, risk_profile=r, label=l)
+
+    # Check fixed-profile structures
+    if st in _PROFILES:
+        g, b, r, l = _PROFILES[st]
+        return StructureProfile(payoff_graph=g, bias=b, risk_profile=r, label=l)
+
+    # Fallback
+    return StructureProfile(
+        payoff_graph="???",
+        bias=dir_,
+        risk_profile=RiskProfile.DEFINED,
+        label=f"{st} · check risk",
+    )
+
+
 class HardStop(BaseModel):
     """A condition that forces a NO_GO verdict."""
 
@@ -358,6 +467,7 @@ class TradeSpec(BaseModel):
     max_profit_desc: str | None = None  # "Credit received" / "Spread width - debit"
     max_loss_desc: str | None = None  # "Wing width - credit" / "UNLIMITED"
     exit_notes: list[str] = []  # Structure-specific guidance
+    max_entry_price: float | None = None  # Don't chase beyond this price
 
     @property
     def leg_codes(self) -> list[str]:

@@ -12,8 +12,29 @@ from market_analyzer.data.providers.base import DataProvider
 from market_analyzer.models.data import DataRequest, DataType, ProviderType
 
 
+# Aliases for tickers whose yfinance symbol differs from the common name.
+# Keys: user-facing ticker.  Values: yfinance symbol.
+_YFINANCE_ALIASES: dict[str, str] = {
+    "SPX":  "^GSPC",   # S&P 500 Index
+    "NDX":  "^NDX",    # Nasdaq-100 Index
+    "DJX":  "^DJI",    # Dow Jones Industrial Average
+    "RUT":  "^RUT",    # Russell 2000 Index
+    "COMP": "^IXIC",   # Nasdaq Composite
+    "SOX":  "^SOX",    # PHLX Semiconductor Index
+    "VIX":  "^VIX",    # CBOE Volatility Index
+    "TNX":  "^TNX",    # 10-Year Treasury Yield
+    "OEX":  "^OEX",    # S&P 100 Index
+    "XSP":  "^GSPC",   # Mini-SPX (same underlying as SPX)
+}
+
+
 class YFinanceProvider(DataProvider):
     """Fetches OHLCV and options chain data from Yahoo Finance."""
+
+    @staticmethod
+    def _resolve_ticker(ticker: str) -> str:
+        """Translate user-facing ticker to yfinance symbol."""
+        return _YFINANCE_ALIASES.get(ticker.upper(), ticker)
 
     @property
     def provider_type(self) -> ProviderType:
@@ -38,7 +59,8 @@ class YFinanceProvider(DataProvider):
         Index: RangeIndex (one row per strike × option_type × expiration).
         """
         try:
-            ticker_obj = yf.Ticker(request.ticker)
+            yf_symbol = self._resolve_ticker(request.ticker)
+            ticker_obj = yf.Ticker(yf_symbol)
             expirations = ticker_obj.options
         except Exception as e:
             raise DataFetchError("yfinance", request.ticker, f"Failed to get options expirations: {e}") from e
@@ -84,9 +106,10 @@ class YFinanceProvider(DataProvider):
         """
         try:
             # yfinance end_date is exclusive — add 1 day to include it
+            yf_symbol = self._resolve_ticker(request.ticker)
             end = request.end_date + timedelta(days=1) if request.end_date else None
             df = yf.download(
-                request.ticker,
+                yf_symbol,
                 start=request.start_date,
                 end=end,
                 progress=False,
@@ -132,7 +155,8 @@ class YFinanceProvider(DataProvider):
     def validate_ticker(self, ticker: str) -> bool:
         """Check if ticker exists on Yahoo Finance."""
         try:
-            info = yf.Ticker(ticker).info
+            yf_symbol = self._resolve_ticker(ticker)
+            info = yf.Ticker(yf_symbol).info
             # yf returns a dict with 'regularMarketPrice' for valid tickers
             return info is not None and info.get("regularMarketPrice") is not None
         except Exception:

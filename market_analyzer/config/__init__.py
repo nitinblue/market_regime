@@ -408,7 +408,7 @@ class BlackSwanSettings(BaseModel):
 
 
 class DisplaySettings(BaseModel):
-    default_tickers: list[str] = Field(default_factory=lambda: ["SPY", "GLD", "QQQ", "TLT"])
+    default_tickers: list[str] = Field(default_factory=lambda: ["SPX", "GLD", "QQQ", "TLT"])
     confidence_cap: float = 99.9
     plot: PlotSettings = Field(default_factory=PlotSettings)
 
@@ -495,7 +495,7 @@ class ExitSettings(BaseModel):
 class TradingPlanSettings(BaseModel):
     """Settings for daily trading plan generation."""
 
-    default_tickers: list[str] = Field(default_factory=lambda: ["SPY", "QQQ", "GLD", "TLT", "IWM"])
+    default_tickers: list[str] = Field(default_factory=lambda: ["SPX", "QQQ", "GLD", "TLT", "IWM"])
     max_trades_per_plan: int = 10
     daily_risk_pct: float = 0.02            # 2% of account per day
     max_new_positions_normal: int = 3

@@ -342,7 +342,7 @@ black_swan:
   lookback_days: 20
 
 display:
-  default_tickers: ["SPY", "GLD", "QQQ", "TLT"]
+  default_tickers: ["SPX", "GLD", "QQQ", "TLT"]
   confidence_cap: 99.9
   plot:
     figure_size: [14, 10]
@@ -403,7 +403,7 @@ exit:
   regime_change_review: true
 
 trading_plan:
-  default_tickers: ["SPY", "QQQ", "GLD", "TLT", "IWM"]
+  default_tickers: ["SPX", "QQQ", "GLD", "TLT", "IWM"]
   max_trades_per_plan: 10
   daily_risk_pct: 0.02
   max_new_positions_normal: 3

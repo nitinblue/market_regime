@@ -570,7 +570,7 @@ class TestTradingPlanConfig:
         assert s.max_new_positions_normal == 3
         assert s.max_new_positions_light == 1
         assert s.fill_slippage_pct == 0.20
-        assert "SPY" in s.default_tickers
+        assert "SPX" in s.default_tickers
 
     def test_settings_on_main_config(self):
         from market_analyzer.config import Settings

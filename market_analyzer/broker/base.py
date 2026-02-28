@@ -12,6 +12,8 @@ from abc import ABC, abstractmethod
 from datetime import date
 from typing import TYPE_CHECKING
 
+import pandas as pd
+
 if TYPE_CHECKING:
     from market_analyzer.models.opportunity import LegSpec
     from market_analyzer.models.quotes import MarketMetrics, OptionQuote
@@ -75,6 +77,18 @@ class MarketDataProvider(ABC):
     def provider_name(self) -> str:
         """'tastytrade', 'schwab', 'ibkr', etc."""
         ...
+
+    # -- Optional intraday / underlying price (default no-ops) --
+
+    def get_intraday_candles(
+        self, ticker: str, interval: str = "5m",
+    ) -> pd.DataFrame:
+        """Today's intraday OHLCV candles. Empty DataFrame if not supported."""
+        return pd.DataFrame()
+
+    def get_underlying_price(self, ticker: str) -> float | None:
+        """Real-time underlying price (mid of bid/ask). None if unavailable."""
+        return None
 
 
 class MarketMetricsProvider(ABC):

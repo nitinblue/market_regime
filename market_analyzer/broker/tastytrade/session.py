@@ -5,6 +5,7 @@ Adapted from eTrading tastytrade_adapter.py.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import re
@@ -76,7 +77,12 @@ class TastyTradeBrokerSession(BrokerSession):
                 is_test=self._is_paper,
             )
 
-            accounts = Account.get(self._session)
+            # Account.get() is async in tastytrade SDK v12+
+            loop = asyncio.new_event_loop()
+            try:
+                accounts = loop.run_until_complete(Account.get(self._session))
+            finally:
+                loop.close()
             self._accounts = {a.account_number: a for a in accounts}
 
             if self._account_number:
@@ -86,7 +92,10 @@ class TastyTradeBrokerSession(BrokerSession):
             else:
                 self._account = next(iter(self._accounts.values()))
 
-            # DXLink needs a live session (paper env doesn't stream)
+            # Create a FRESH Session for DXLink streaming.
+            # The auth session above may have stale httpx connections from
+            # the event loop used for Account.get(). A fresh Session avoids
+            # "Event loop is closed" errors in subsequent asyncio.run() calls.
             if self._is_paper:
                 self._data_session = Session(
                     self._data_client_secret,
@@ -94,7 +103,11 @@ class TastyTradeBrokerSession(BrokerSession):
                     is_test=False,
                 )
             else:
-                self._data_session = self._session
+                self._data_session = Session(
+                    self._data_client_secret,
+                    self._data_refresh_token,
+                    is_test=False,
+                )
 
             self._connected = True
             logger.info("Authenticated with TastyTrade (account %s)", self._account.account_number)

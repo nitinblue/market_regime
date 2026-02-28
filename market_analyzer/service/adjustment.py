@@ -1,8 +1,12 @@
-"""Trade adjustment analyzer — ranks post-entry alternatives by cost efficiency."""
+"""Trade adjustment analyzer — ranks post-entry alternatives by cost efficiency.
+
+All option pricing comes from broker quotes via OptionQuoteService.
+Without a broker connection, adjustments are generated with unknown (None) costs.
+No Black-Scholes estimates are used for pricing.
+"""
 
 from __future__ import annotations
 
-import math
 from datetime import date, timedelta
 from typing import TYPE_CHECKING
 
@@ -21,14 +25,10 @@ from market_analyzer.models.opportunity import (
 )
 from market_analyzer.models.regime import RegimeResult
 from market_analyzer.models.technicals import TechnicalSnapshot
-from market_analyzer.opportunity.option_plays._trade_spec_helpers import (
-    _bs_price,
-    compute_otm_strike,
-    estimate_trade_price,
-    snap_strike,
-)
+from market_analyzer.opportunity.option_plays._trade_spec_helpers import snap_strike
 
 if TYPE_CHECKING:
+    from market_analyzer.models.quotes import OptionQuote
     from market_analyzer.models.vol_surface import VolatilitySurface
     from market_analyzer.service.option_quotes import OptionQuoteService
 
@@ -43,7 +43,11 @@ _REGIME_URGENCY: dict[int, str] = {
 
 
 class AdjustmentService:
-    """Analyzes open positions and ranks adjustment alternatives."""
+    """Analyzes open positions and ranks adjustment alternatives.
+
+    All option pricing comes from broker quotes via OptionQuoteService.
+    Without a broker, adjustments are generated but costs are None.
+    """
 
     def __init__(
         self, quote_service: OptionQuoteService | None = None,
@@ -52,10 +56,10 @@ class AdjustmentService:
 
     @property
     def quote_source(self) -> str:
-        """Data source: broker name or 'Black-Scholes (estimated)'."""
+        """Data source description."""
         if self._quotes and self._quotes.has_broker:
             return f"{self._quotes.source} (real quotes)"
-        return "Black-Scholes (estimated)"
+        return "no broker (costs unavailable)"
 
     def analyze(
         self,
@@ -82,7 +86,7 @@ class AdjustmentService:
             trade_spec, price, atr,
         )
 
-        pnl = self._estimate_pnl(trade_spec, price)
+        pnl = self._estimate_pnl(trade_spec)
 
         remaining_dte = max(
             (trade_spec.target_expiration - date.today()).days, 0,
@@ -90,7 +94,7 @@ class AdjustmentService:
 
         adjustments = self._generate_adjustments(
             trade_spec, status, tested_side, regime.regime, price, atr,
-            vol_surface, remaining_dte,
+            vol_surface, remaining_dte, pnl,
         )
         adjustments = self._rank(adjustments)
 
@@ -98,11 +102,12 @@ class AdjustmentService:
             adjustments, status, tested_side, regime.regime,
         )
 
+        pnl_str = f"${pnl:+.2f}" if pnl is not None else "N/A (no broker)"
         summary = (
             f"{trade_spec.ticker} {trade_spec.structure_type or 'position'}: "
             f"{status.value.upper()} "
             f"({'no side tested' if tested_side == TestedSide.NONE else tested_side.value + ' side tested'}) | "
-            f"P&L: ${pnl:+.2f} | "
+            f"P&L: {pnl_str} | "
             f"{remaining_dte} DTE | R{regime.regime} → {recommendation}"
         )
 
@@ -203,69 +208,59 @@ class AdjustmentService:
         return PositionStatus.TESTED, tested_side, dist_put, dist_call
 
     # ------------------------------------------------------------------
-    # P&L estimation
+    # P&L estimation (broker quotes only)
     # ------------------------------------------------------------------
 
-    def _estimate_pnl(self, trade_spec: TradeSpec, current_price: float) -> float:
-        """Estimate current P&L by repricing all legs at current price.
+    def _estimate_pnl(self, trade_spec: TradeSpec) -> float | None:
+        """Estimate current position mark using broker mid prices.
 
-        Uses real mid prices from broker when available, falls back to BS.
+        Returns None when no broker is connected — cannot price without
+        real quotes. Does NOT use Black-Scholes.
         """
-        remaining_dte = max(
-            (trade_spec.target_expiration - date.today()).days, 1,
+        quote_map = self._fetch_quotes(
+            trade_spec.ticker, list(trade_spec.legs),
         )
-        dte_years = remaining_dte / 365.0
+        if not quote_map:
+            return None
 
-        entry_price = estimate_trade_price(trade_spec)
-        if entry_price is None:
-            return 0.0
-
-        # Try real quotes first
-        quote_map = self._get_leg_quote_map(trade_spec)
-
-        # Reprice at current underlying
         current_value = 0.0
         for leg in trade_spec.legs:
-            leg_key = f"{leg.strike:.0f}{leg.option_type[0].upper()}"
-            quote = quote_map.get(leg_key)
-
-            if quote is not None:
-                leg_price = quote.mid
-            else:
-                leg_price = _bs_price(
-                    current_price, leg.strike, dte_years,
-                    leg.atm_iv_at_expiry, leg.option_type,
-                )
+            q = quote_map.get(self._leg_key(leg))
+            if q is None:
+                return None  # Missing quote → can't compute accurate mark
 
             if leg.action == LegAction.SELL_TO_OPEN:
-                current_value += leg_price * leg.quantity
+                current_value += q.mid * leg.quantity
             else:
-                current_value -= leg_price * leg.quantity
+                current_value -= q.mid * leg.quantity
 
-        # P&L = current mark-to-market vs entry
-        # entry_price: positive = credit received, negative = debit paid
-        # current_value: positive = net credit to close, negative = net debit to close
-        # For a credit trade: P&L = entry_credit - cost_to_close
-        # cost_to_close = -current_value (flip sign: what we'd pay to unwind)
-        return round(entry_price + current_value, 2)
+        return round(current_value, 2)
 
-    def _get_leg_quote_map(self, trade_spec: TradeSpec) -> dict:
-        """Fetch real quotes for all legs if broker available.
+    # ------------------------------------------------------------------
+    # Broker quote helpers
+    # ------------------------------------------------------------------
 
-        Returns ``{leg_key: OptionQuote}`` or empty dict.
-        """
+    def _fetch_quotes(
+        self, ticker: str, legs: list[LegSpec],
+    ) -> dict[str, OptionQuote]:
+        """Fetch broker quotes for legs. Empty dict if no broker."""
         if not self._quotes or not self._quotes.has_broker:
             return {}
-
         try:
-            quotes = self._quotes.get_leg_quotes(trade_spec.legs, trade_spec.ticker)
-            result = {}
-            for q in quotes:
-                key = f"{q.strike:.0f}{q.option_type[0].upper()}"
-                result[key] = q
-            return result
+            quotes = self._quotes.get_leg_quotes(legs, ticker)
+            return {
+                self._quote_key(q.strike, q.option_type, q.expiration): q
+                for q in quotes
+            }
         except Exception:
             return {}
+
+    @staticmethod
+    def _quote_key(strike: float, option_type: str, expiration: date) -> str:
+        return f"{strike:.2f}|{option_type}|{expiration}"
+
+    def _leg_key(self, leg: LegSpec) -> str:
+        return self._quote_key(leg.strike, leg.option_type, leg.expiration)
 
     # ------------------------------------------------------------------
     # Adjustment generation
@@ -281,6 +276,7 @@ class AdjustmentService:
         atr: float,
         vol_surface: VolatilitySurface | None,
         remaining_dte: int,
+        pnl: float | None,
     ) -> list[AdjustmentOption]:
         """Generate all applicable adjustments for the structure type."""
         urgency = _REGIME_URGENCY.get(regime_id, "monitor")
@@ -292,7 +288,6 @@ class AdjustmentService:
         adjustments.append(self._do_nothing(status, regime_id, urgency))
 
         # CLOSE_FULL is always an option
-        pnl = self._estimate_pnl(trade_spec, price)
         adjustments.append(self._close_full(trade_spec, pnl, status, urgency))
 
         # Structure-specific adjustments
@@ -361,24 +356,26 @@ class AdjustmentService:
     def _close_full(
         self,
         trade_spec: TradeSpec,
-        pnl: float,
+        pnl: float | None,
         status: PositionStatus,
         urgency: str,
     ) -> AdjustmentOption:
-        # Closing cost = negative of current P&L (pay to exit if losing)
-        cost = -pnl
-        # Risk change: all risk removed
+        cost = -pnl if pnl is not None else None
         risk_removed = -(trade_spec.wing_width_points or 5.0) * 100
-        eff = abs(risk_removed) / abs(cost) if cost > 0 else None
+        if cost is not None and cost > 0:
+            eff = abs(risk_removed) / cost
+        else:
+            eff = None
 
         close_urgency = "immediate" if status == PositionStatus.MAX_LOSS else urgency
+        pnl_str = f"${pnl:+.2f}" if pnl is not None else "unknown"
 
         return AdjustmentOption(
             adjustment_type=AdjustmentType.CLOSE_FULL,
-            description=f"Close entire position at ${pnl:+.2f} P&L",
+            description=f"Close entire position (P&L: {pnl_str})",
             new_legs=[],
             close_legs=list(trade_spec.legs),
-            estimated_cost=round(cost, 2),
+            estimated_cost=round(cost, 2) if cost is not None else None,
             risk_change=round(risk_removed, 2),
             efficiency=round(eff, 2) if eff is not None else None,
             urgency=close_urgency,
@@ -400,6 +397,7 @@ class AdjustmentService:
         adjustments: list[AdjustmentOption] = []
         exp = trade_spec.target_expiration
         avg_iv = self._avg_iv(trade_spec)
+        ticker = trade_spec.ticker
 
         if tested_side in (TestedSide.PUT, TestedSide.BOTH):
             # Roll tested put side away (further OTM)
@@ -408,19 +406,24 @@ class AdjustmentService:
             if short_puts:
                 old_strike = max(l.strike for l in short_puts)
                 new_strike = snap_strike(old_strike - 0.5 * atr, price)
-                roll_credit = self._roll_credit(old_strike, new_strike, "put", price, avg_iv, remaining_dte)
+                roll_credit = self._roll_credit(
+                    ticker, old_strike, new_strike, "put", exp, remaining_dte, avg_iv,
+                )
+                strike_diff = abs(old_strike - new_strike)
                 adjustments.append(AdjustmentOption(
                     adjustment_type=AdjustmentType.ROLL_AWAY,
                     description=f"Roll short put {old_strike:.0f}→{new_strike:.0f}",
                     new_legs=[self._make_leg("short_put", LegAction.SELL_TO_OPEN, "put",
                                              new_strike, exp, remaining_dte, avg_iv)],
-                    close_legs=[l for l in short_puts],
-                    estimated_cost=round(roll_credit, 2),
-                    risk_change=-round(abs(old_strike - new_strike) * 100, 2),
-                    efficiency=None if roll_credit <= 0 else round(
-                        abs(old_strike - new_strike) * 100 / roll_credit, 2),
+                    close_legs=list(short_puts),
+                    estimated_cost=round(roll_credit, 2) if roll_credit is not None else None,
+                    risk_change=-round(strike_diff * 100, 2),
+                    efficiency=(
+                        None if roll_credit is None or roll_credit <= 0
+                        else round(strike_diff * 100 / roll_credit, 2)
+                    ),
                     urgency=urgency,
-                    rationale=f"Move tested put further OTM — gives price room",
+                    rationale="Move tested put further OTM — gives price room",
                 ))
 
         if tested_side in (TestedSide.CALL, TestedSide.BOTH):
@@ -430,19 +433,24 @@ class AdjustmentService:
             if short_calls:
                 old_strike = min(l.strike for l in short_calls)
                 new_strike = snap_strike(old_strike + 0.5 * atr, price)
-                roll_credit = self._roll_credit(old_strike, new_strike, "call", price, avg_iv, remaining_dte)
+                roll_credit = self._roll_credit(
+                    ticker, old_strike, new_strike, "call", exp, remaining_dte, avg_iv,
+                )
+                strike_diff = abs(new_strike - old_strike)
                 adjustments.append(AdjustmentOption(
                     adjustment_type=AdjustmentType.ROLL_AWAY,
                     description=f"Roll short call {old_strike:.0f}→{new_strike:.0f}",
                     new_legs=[self._make_leg("short_call", LegAction.SELL_TO_OPEN, "call",
                                              new_strike, exp, remaining_dte, avg_iv)],
-                    close_legs=[l for l in short_calls],
-                    estimated_cost=round(roll_credit, 2),
-                    risk_change=-round(abs(new_strike - old_strike) * 100, 2),
-                    efficiency=None if roll_credit <= 0 else round(
-                        abs(new_strike - old_strike) * 100 / roll_credit, 2),
+                    close_legs=list(short_calls),
+                    estimated_cost=round(roll_credit, 2) if roll_credit is not None else None,
+                    risk_change=-round(strike_diff * 100, 2),
+                    efficiency=(
+                        None if roll_credit is None or roll_credit <= 0
+                        else round(strike_diff * 100 / roll_credit, 2)
+                    ),
                     urgency=urgency,
-                    rationale=f"Move tested call further OTM — gives price room",
+                    rationale="Move tested call further OTM — gives price room",
                 ))
 
         # Narrow untested side for credit
@@ -453,16 +461,19 @@ class AdjustmentService:
                 old_call = min(l.strike for l in short_calls)
                 new_call = snap_strike(old_call - 0.5 * atr, price)
                 if new_call > price:  # Must stay OTM
-                    credit = self._narrow_credit(old_call, new_call, "call", price, avg_iv, remaining_dte)
+                    credit = self._narrow_credit(
+                        ticker, old_call, new_call, "call", exp, remaining_dte, avg_iv,
+                    )
+                    credit_desc = f" for ${abs(credit):.2f} credit" if credit is not None else ""
                     adjustments.append(AdjustmentOption(
                         adjustment_type=AdjustmentType.NARROW_UNTESTED,
-                        description=f"Narrow call {old_call:.0f}→{new_call:.0f} for ${abs(credit):.2f} credit",
+                        description=f"Narrow call {old_call:.0f}→{new_call:.0f}{credit_desc}",
                         new_legs=[self._make_leg("short_call", LegAction.SELL_TO_OPEN, "call",
                                                  new_call, exp, remaining_dte, avg_iv)],
-                        close_legs=[l for l in short_calls],
-                        estimated_cost=round(credit, 2),
+                        close_legs=list(short_calls),
+                        estimated_cost=round(credit, 2) if credit is not None else None,
                         risk_change=-round(abs(old_call - new_call) * 100, 2),
-                        efficiency=None,  # Free credit
+                        efficiency=None,
                         urgency="monitor",
                         rationale="Collect credit from untested side to offset tested side risk",
                     ))
@@ -474,14 +485,17 @@ class AdjustmentService:
                 old_put = max(l.strike for l in short_puts)
                 new_put = snap_strike(old_put + 0.5 * atr, price)
                 if new_put < price:  # Must stay OTM
-                    credit = self._narrow_credit(old_put, new_put, "put", price, avg_iv, remaining_dte)
+                    credit = self._narrow_credit(
+                        ticker, old_put, new_put, "put", exp, remaining_dte, avg_iv,
+                    )
+                    credit_desc = f" for ${abs(credit):.2f} credit" if credit is not None else ""
                     adjustments.append(AdjustmentOption(
                         adjustment_type=AdjustmentType.NARROW_UNTESTED,
-                        description=f"Narrow put {old_put:.0f}→{new_put:.0f} for ${abs(credit):.2f} credit",
+                        description=f"Narrow put {old_put:.0f}→{new_put:.0f}{credit_desc}",
                         new_legs=[self._make_leg("short_put", LegAction.SELL_TO_OPEN, "put",
                                                  new_put, exp, remaining_dte, avg_iv)],
-                        close_legs=[l for l in short_puts],
-                        estimated_cost=round(credit, 2),
+                        close_legs=list(short_puts),
+                        estimated_cost=round(credit, 2) if credit is not None else None,
                         risk_change=-round(abs(new_put - old_put) * 100, 2),
                         efficiency=None,
                         urgency="monitor",
@@ -490,22 +504,25 @@ class AdjustmentService:
 
         # Convert to butterfly (collapse into tested side)
         if status in (PositionStatus.TESTED, PositionStatus.BREACHED):
-            # Compute credit from closing untested side
             untested_type = "call" if tested_side == TestedSide.PUT else "put"
             untested_legs = [l for l in trade_spec.legs if l.option_type == untested_type]
-            convert_credit = 0.0
-            for leg in untested_legs:
-                leg_price = _bs_price(price, leg.strike,
-                                      max(remaining_dte, 1) / 365.0,
-                                      avg_iv, leg.option_type)
-                if leg.action == LegAction.SELL_TO_OPEN:
-                    # Buy back short = pay
-                    convert_credit += leg_price * leg.quantity
-                else:
-                    # Sell long = receive
-                    convert_credit -= leg_price * leg.quantity
-            # Negative = net credit from closing untested side
-            convert_credit = round(-convert_credit, 2)
+
+            convert_credit: float | None = None
+            qmap = self._fetch_quotes(ticker, untested_legs)
+            if qmap:
+                total = 0.0
+                all_priced = True
+                for leg in untested_legs:
+                    q = qmap.get(self._leg_key(leg))
+                    if q is None:
+                        all_priced = False
+                        break
+                    if leg.action == LegAction.SELL_TO_OPEN:
+                        total += q.mid * leg.quantity  # Buy back short
+                    else:
+                        total -= q.mid * leg.quantity  # Sell long
+                if all_priced:
+                    convert_credit = round(-total, 2)
 
             adjustments.append(AdjustmentOption(
                 adjustment_type=AdjustmentType.CONVERT,
@@ -523,10 +540,7 @@ class AdjustmentService:
         # Roll out in time
         if remaining_dte < 21 and status == PositionStatus.TESTED:
             new_exp = exp + timedelta(days=7)
-            new_dte = remaining_dte + 7
-            # Compute roll credit: buy back at current DTE, sell at new DTE
-            roll_cost = self._roll_out_cost(trade_spec, tested_side, price, avg_iv,
-                                            remaining_dte, new_dte)
+            roll_cost = self._roll_out_cost(trade_spec, tested_side, remaining_dte, 7)
             adjustments.append(AdjustmentOption(
                 adjustment_type=AdjustmentType.ROLL_OUT,
                 description=f"Roll tested side out 7 days to {new_exp}",
@@ -556,6 +570,7 @@ class AdjustmentService:
         adjustments: list[AdjustmentOption] = []
         exp = trade_spec.target_expiration
         avg_iv = self._avg_iv(trade_spec)
+        ticker = trade_spec.ticker
 
         short_legs = [l for l in trade_spec.legs if l.action == LegAction.SELL_TO_OPEN]
         if short_legs:
@@ -566,8 +581,9 @@ class AdjustmentService:
             else:
                 new_strike = snap_strike(short.strike + 0.5 * atr, price)
             roll_credit = self._roll_credit(
-                short.strike, new_strike, short.option_type, price, avg_iv, remaining_dte,
+                ticker, short.strike, new_strike, short.option_type, exp, remaining_dte, avg_iv,
             )
+            strike_diff = abs(new_strike - short.strike)
             adjustments.append(AdjustmentOption(
                 adjustment_type=AdjustmentType.ROLL_AWAY,
                 description=f"Roll short {short.option_type} {short.strike:.0f}→{new_strike:.0f}",
@@ -576,10 +592,12 @@ class AdjustmentService:
                     short.option_type, new_strike, exp, remaining_dte, avg_iv,
                 )],
                 close_legs=[short],
-                estimated_cost=round(roll_credit, 2),
-                risk_change=-round(abs(new_strike - short.strike) * 100, 2),
-                efficiency=None if roll_credit <= 0 else round(
-                    abs(new_strike - short.strike) * 100 / roll_credit, 2),
+                estimated_cost=round(roll_credit, 2) if roll_credit is not None else None,
+                risk_change=-round(strike_diff * 100, 2),
+                efficiency=(
+                    None if roll_credit is None or roll_credit <= 0
+                    else round(strike_diff * 100 / roll_credit, 2)
+                ),
                 urgency=urgency,
                 rationale="Move short strike further OTM for more room",
             ))
@@ -587,10 +605,8 @@ class AdjustmentService:
             # Roll out
             if remaining_dte < 21:
                 new_exp = exp + timedelta(days=7)
-                new_dte = remaining_dte + 7
                 roll_cost = self._roll_out_cost(
-                    trade_spec, tested_side, price, avg_iv,
-                    remaining_dte, new_dte,
+                    trade_spec, tested_side, remaining_dte, 7,
                 )
                 adjustments.append(AdjustmentOption(
                     adjustment_type=AdjustmentType.ROLL_OUT,
@@ -617,24 +633,42 @@ class AdjustmentService:
     ) -> list[AdjustmentOption]:
         """Adjustments for calendar and double calendar spreads."""
         adjustments: list[AdjustmentOption] = []
+        ticker = trade_spec.ticker
         avg_iv = self._avg_iv(trade_spec)
 
         # Roll front leg
         if remaining_dte < 10:
-            # Compute cost: buy back front at current DTE, sell new front at +30 DTE
             front_legs = [l for l in trade_spec.legs
                           if l.action == LegAction.SELL_TO_OPEN]
-            roll_cost = 0.0
+
+            # Build new legs at +30 DTE for pricing
+            new_exp = trade_spec.target_expiration + timedelta(days=30)
+            new_dte = remaining_dte + 30
+
+            all_legs: list[LegSpec] = []
             for leg in front_legs:
-                old_price = _bs_price(price, leg.strike,
-                                      max(remaining_dte, 1) / 365.0,
-                                      avg_iv, leg.option_type)
-                new_price = _bs_price(price, leg.strike,
-                                      (remaining_dte + 30) / 365.0,
-                                      avg_iv, leg.option_type)
-                # Buy back old (pay), sell new (receive)
-                roll_cost += old_price - new_price
-            roll_cost = round(roll_cost, 2)
+                all_legs.append(leg)  # Old leg (buy back)
+                all_legs.append(self._make_leg(
+                    leg.role, LegAction.SELL_TO_OPEN, leg.option_type,
+                    leg.strike, new_exp, new_dte, avg_iv,
+                ))  # New leg (sell)
+
+            qmap = self._fetch_quotes(ticker, all_legs)
+            roll_cost: float | None = None
+            if qmap:
+                total = 0.0
+                all_priced = True
+                for i, leg in enumerate(front_legs):
+                    old_q = qmap.get(self._leg_key(leg))
+                    new_leg = all_legs[i * 2 + 1]
+                    new_q = qmap.get(self._leg_key(new_leg))
+                    if old_q is None or new_q is None:
+                        all_priced = False
+                        break
+                    # Buy back old (pay mid), sell new (receive mid)
+                    total += (old_q.mid - new_q.mid) * leg.quantity
+                if all_priced:
+                    roll_cost = round(total, 2)
 
             adjustments.append(AdjustmentOption(
                 adjustment_type=AdjustmentType.ROLL_OUT,
@@ -664,6 +698,7 @@ class AdjustmentService:
         avg_iv = self._avg_iv(trade_spec)
         exp = trade_spec.target_expiration
         dte = max((exp - date.today()).days, 1)
+        ticker = trade_spec.ticker
 
         # ADD_WING to close naked risk — priority adjustment
         short_legs = [l for l in trade_spec.legs if l.action == LegAction.SELL_TO_OPEN]
@@ -674,19 +709,26 @@ class AdjustmentService:
             else:
                 wing_strike = snap_strike(short.strike - 0.5 * atr, price)
 
-            wing_cost = _bs_price(price, wing_strike, dte / 365.0, avg_iv, short.option_type)
+            wing_leg = self._make_leg(
+                f"long_{short.option_type}", LegAction.BUY_TO_OPEN,
+                short.option_type, wing_strike, exp, dte, avg_iv,
+            )
+            qmap = self._fetch_quotes(ticker, [wing_leg])
+            wing_q = qmap.get(self._leg_key(wing_leg))
+            wing_cost = wing_q.mid if wing_q else None
+            strike_diff = abs(wing_strike - short.strike)
 
             adjustments.append(AdjustmentOption(
                 adjustment_type=AdjustmentType.ADD_WING,
                 description=f"Buy {wing_strike:.0f}{short.option_type[0].upper()} to cap naked risk",
-                new_legs=[self._make_leg(
-                    f"long_{short.option_type}", LegAction.BUY_TO_OPEN,
-                    short.option_type, wing_strike, exp, dte, avg_iv,
-                )],
+                new_legs=[wing_leg],
                 close_legs=[],
-                estimated_cost=round(wing_cost, 2),
-                risk_change=-round(abs(wing_strike - short.strike) * 100, 2),
-                efficiency=round(abs(wing_strike - short.strike) * 100 / wing_cost, 2) if wing_cost > 0 else None,
+                estimated_cost=round(wing_cost, 2) if wing_cost is not None else None,
+                risk_change=-round(strike_diff * 100, 2),
+                efficiency=(
+                    round(strike_diff * 100 / wing_cost, 2)
+                    if wing_cost is not None and wing_cost > 0 else None
+                ),
                 urgency="soon",
                 rationale="Naked leg has UNLIMITED risk — adding wing converts to defined risk",
             ))
@@ -697,14 +739,14 @@ class AdjustmentService:
         self,
         trade_spec: TradeSpec,
         status: PositionStatus,
-        pnl: float,
+        pnl: float | None,
         urgency: str,
     ) -> list[AdjustmentOption]:
         """Adjustments for debit spreads."""
         adjustments: list[AdjustmentOption] = []
 
         # Close at target if profitable
-        if pnl > 0:
+        if pnl is not None and pnl > 0:
             adjustments.append(AdjustmentOption(
                 adjustment_type=AdjustmentType.CLOSE_FULL,
                 description=f"Take profit at ${pnl:+.2f}",
@@ -733,6 +775,7 @@ class AdjustmentService:
         avg_iv = self._avg_iv(trade_spec)
         exp = trade_spec.target_expiration
         dte = max((exp - date.today()).days, 1)
+        ticker = trade_spec.ticker
 
         # ADD_WING to define risk
         if trade_spec.order_side == "credit":
@@ -746,18 +789,27 @@ class AdjustmentService:
                         wing_strike = snap_strike(short.strike + atr, price)
                     else:
                         wing_strike = snap_strike(short.strike - atr, price)
-                    wing_cost = _bs_price(price, wing_strike, dte / 365.0, avg_iv, opt_type)
+
+                    wing_leg = self._make_leg(
+                        f"long_{opt_type}", LegAction.BUY_TO_OPEN,
+                        opt_type, wing_strike, exp, dte, avg_iv,
+                    )
+                    qmap = self._fetch_quotes(ticker, [wing_leg])
+                    wing_q = qmap.get(self._leg_key(wing_leg))
+                    wing_cost = wing_q.mid if wing_q else None
+                    strike_diff = abs(wing_strike - short.strike)
+
                     adjustments.append(AdjustmentOption(
                         adjustment_type=AdjustmentType.ADD_WING,
                         description=f"Buy {wing_strike:.0f}{opt_type[0].upper()} wing to define risk",
-                        new_legs=[self._make_leg(
-                            f"long_{opt_type}", LegAction.BUY_TO_OPEN,
-                            opt_type, wing_strike, exp, dte, avg_iv,
-                        )],
+                        new_legs=[wing_leg],
                         close_legs=[],
-                        estimated_cost=round(wing_cost, 2),
-                        risk_change=-round(abs(wing_strike - short.strike) * 100, 2),
-                        efficiency=round(abs(wing_strike - short.strike) * 100 / wing_cost, 2) if wing_cost > 0 else None,
+                        estimated_cost=round(wing_cost, 2) if wing_cost is not None else None,
+                        risk_change=-round(strike_diff * 100, 2),
+                        efficiency=(
+                            round(strike_diff * 100 / wing_cost, 2)
+                            if wing_cost is not None and wing_cost > 0 else None
+                        ),
                         urgency="soon",
                         rationale=f"Define {opt_type} side risk with protective wing",
                     ))
@@ -767,16 +819,22 @@ class AdjustmentService:
             side = "put" if tested_side == TestedSide.PUT else "call"
             tested_legs = [l for l in trade_spec.legs if l.option_type == side]
             if tested_legs:
-                # Compute cost to close tested side
-                close_cost = 0.0
-                for leg in tested_legs:
-                    leg_price = _bs_price(price, leg.strike, dte / 365.0,
-                                          avg_iv, leg.option_type)
-                    if leg.action == LegAction.SELL_TO_OPEN:
-                        close_cost += leg_price * leg.quantity  # Buy back short
-                    else:
-                        close_cost -= leg_price * leg.quantity  # Sell long
-                close_cost = round(close_cost, 2)
+                qmap = self._fetch_quotes(ticker, tested_legs)
+                close_cost: float | None = None
+                if qmap:
+                    total = 0.0
+                    all_priced = True
+                    for leg in tested_legs:
+                        q = qmap.get(self._leg_key(leg))
+                        if q is None:
+                            all_priced = False
+                            break
+                        if leg.action == LegAction.SELL_TO_OPEN:
+                            total += q.mid * leg.quantity  # Buy back short
+                        else:
+                            total -= q.mid * leg.quantity  # Sell long
+                    if all_priced:
+                        close_cost = round(total, 2)
 
                 adjustments.append(AdjustmentOption(
                     adjustment_type=AdjustmentType.CLOSE_FULL,
@@ -803,12 +861,15 @@ class AdjustmentService:
             # 0 = DO_NOTHING (always first — hold is the baseline)
             # 1 = credit-generating adjustments (cost <= 0) with risk reduction
             # 2 = paid adjustments sorted by efficiency (higher = better)
-            # 3 = adjustments without efficiency
+            # 3 = adjustments without efficiency or unknown cost
             # 4 = CLOSE_FULL (always last unless urgency is immediate)
             if adj.adjustment_type == AdjustmentType.DO_NOTHING:
                 return (0, 0.0)
             if adj.adjustment_type == AdjustmentType.CLOSE_FULL and adj.urgency != "immediate":
-                return (4, adj.estimated_cost)
+                return (4, adj.estimated_cost or 0.0)
+            if adj.estimated_cost is None:
+                # Unknown cost — after priced adjustments, before CLOSE_FULL
+                return (3, 0.0)
             if adj.estimated_cost <= 0 and adj.risk_change < 0:
                 return (1, adj.estimated_cost)
             if adj.efficiency is not None and adj.efficiency > 0:
@@ -837,11 +898,7 @@ class AdjustmentService:
     # ------------------------------------------------------------------
 
     def _avg_iv(self, trade_spec: TradeSpec) -> float:
-        """Average IV across all legs.
-
-        Returns 0.0 if no legs — callers must handle zero IV
-        (which causes _bs_price to return intrinsic only).
-        """
+        """Average IV across all legs (for LegSpec metadata only, not pricing)."""
         if not trade_spec.legs:
             return 0.0
         return sum(l.atm_iv_at_expiry for l in trade_spec.legs) / len(trade_spec.legs)
@@ -867,15 +924,12 @@ class AdjustmentService:
         self,
         trade_spec: TradeSpec,
         tested_side: TestedSide,
-        price: float,
-        iv: float,
         old_dte: int,
-        new_dte: int,
-    ) -> float:
-        """Compute cost of rolling short legs out in time.
+        extra_days: int,
+    ) -> float | None:
+        """Compute cost of rolling short legs out in time via broker quotes.
 
-        Reprices tested-side short legs at old DTE (buy back) and new DTE (sell).
-        Returns positive = net debit, negative = net credit.
+        Returns None without broker.
         """
         side_filter = {
             TestedSide.PUT: "put",
@@ -889,53 +943,85 @@ class AdjustmentService:
             and (target_type is None or l.option_type == target_type)
         ]
         if not short_legs:
-            return 0.0
+            return None
+
+        avg_iv = self._avg_iv(trade_spec)
+        new_exp = trade_spec.target_expiration + timedelta(days=extra_days)
+        new_dte = old_dte + extra_days
+
+        # Build all legs to price: old (buy back) + new (sell)
+        all_legs: list[LegSpec] = []
+        for leg in short_legs:
+            all_legs.append(leg)  # Old leg
+            all_legs.append(self._make_leg(
+                leg.role, LegAction.SELL_TO_OPEN, leg.option_type,
+                leg.strike, new_exp, new_dte, avg_iv,
+            ))  # New leg at further expiration
+
+        qmap = self._fetch_quotes(trade_spec.ticker, all_legs)
+        if not qmap:
+            return None
 
         total = 0.0
-        old_years = max(old_dte, 1) / 365.0
-        new_years = max(new_dte, 1) / 365.0
-        for leg in short_legs:
-            old_price = _bs_price(price, leg.strike, old_years, iv, leg.option_type)
-            new_price = _bs_price(price, leg.strike, new_years, iv, leg.option_type)
-            # Buy back at old DTE (pay), sell at new DTE (receive)
-            total += (old_price - new_price) * leg.quantity
+        for i, leg in enumerate(short_legs):
+            old_q = qmap.get(self._leg_key(leg))
+            new_leg = all_legs[i * 2 + 1]
+            new_q = qmap.get(self._leg_key(new_leg))
+            if old_q is None or new_q is None:
+                return None
+            # Buy back old (pay mid), sell new (receive mid)
+            total += (old_q.mid - new_q.mid) * leg.quantity
+
         return round(total, 2)
 
     def _roll_credit(
         self,
+        ticker: str,
         old_strike: float,
         new_strike: float,
         option_type: str,
-        price: float,
-        iv: float,
+        expiration: date,
         dte: int,
-    ) -> float:
-        """Estimate net credit/debit of rolling a short strike.
+        iv: float,
+    ) -> float | None:
+        """Net credit/debit of rolling a short strike via broker quotes.
 
-        Returns positive = pay (debit), negative = receive (credit).
+        Returns None without broker.
         """
-        dte_years = max(dte, 1) / 365.0
-        # Buy back old, sell new
-        old_price = _bs_price(price, old_strike, dte_years, iv, option_type)
-        new_price = _bs_price(price, new_strike, dte_years, iv, option_type)
-        # Cost to roll: pay for old (buy back) - receive for new (sell)
-        return round(old_price - new_price, 2)
+        old_leg = self._make_leg(f"short_{option_type}", LegAction.SELL_TO_OPEN,
+                                  option_type, old_strike, expiration, dte, iv)
+        new_leg = self._make_leg(f"short_{option_type}", LegAction.SELL_TO_OPEN,
+                                  option_type, new_strike, expiration, dte, iv)
+        qmap = self._fetch_quotes(ticker, [old_leg, new_leg])
+        old_q = qmap.get(self._leg_key(old_leg))
+        new_q = qmap.get(self._leg_key(new_leg))
+        if old_q is None or new_q is None:
+            return None
+        # Buy back old (pay mid), sell new (receive mid)
+        return round(old_q.mid - new_q.mid, 2)
 
     def _narrow_credit(
         self,
+        ticker: str,
         old_strike: float,
         new_strike: float,
         option_type: str,
-        price: float,
-        iv: float,
+        expiration: date,
         dte: int,
-    ) -> float:
-        """Estimate credit from narrowing untested side.
+        iv: float,
+    ) -> float | None:
+        """Credit from narrowing untested side via broker quotes.
 
-        Returns negative = credit received.
+        Returns None without broker.
         """
-        dte_years = max(dte, 1) / 365.0
-        old_price = _bs_price(price, old_strike, dte_years, iv, option_type)
-        new_price = _bs_price(price, new_strike, dte_years, iv, option_type)
+        old_leg = self._make_leg(f"short_{option_type}", LegAction.SELL_TO_OPEN,
+                                  option_type, old_strike, expiration, dte, iv)
+        new_leg = self._make_leg(f"short_{option_type}", LegAction.SELL_TO_OPEN,
+                                  option_type, new_strike, expiration, dte, iv)
+        qmap = self._fetch_quotes(ticker, [old_leg, new_leg])
+        old_q = qmap.get(self._leg_key(old_leg))
+        new_q = qmap.get(self._leg_key(new_leg))
+        if old_q is None or new_q is None:
+            return None
         # Buy back old (further OTM, cheaper) - sell new (closer, more expensive)
-        return round(old_price - new_price, 2)
+        return round(old_q.mid - new_q.mid, 2)

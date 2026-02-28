@@ -69,7 +69,9 @@ class MarketAnalyzer:
 
         # --- Existing services (unchanged) ---
         self.regime = RegimeService(config=config, data_service=data_service)
-        self.technicals = TechnicalService(data_service=data_service)
+        self.technicals = TechnicalService(
+            data_service=data_service, market_data=market_data,
+        )
         self.phase = PhaseService(
             regime_service=self.regime, data_service=data_service
         )

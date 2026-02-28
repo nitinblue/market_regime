@@ -92,6 +92,7 @@ class FundamentalsSnapshot(BaseModel):
 
     ticker: str
     as_of: datetime
+    asset_type: str = "EQUITY"  # EQUITY, ETF, INDEX, MUTUALFUND, etc.
     business: BusinessInfo
     valuation: ValuationMetrics
     earnings: EarningsMetrics
@@ -104,3 +105,14 @@ class FundamentalsSnapshot(BaseModel):
     fifty_two_week: FiftyTwoWeek
     recent_earnings: list[EarningsEvent]
     upcoming_events: UpcomingEvents
+
+    @property
+    def is_equity(self) -> bool:
+        return self.asset_type == "EQUITY"
+
+    @property
+    def has_earnings(self) -> bool:
+        return self.is_equity and (
+            self.upcoming_events.days_to_earnings is not None
+            or len(self.recent_earnings) > 0
+        )

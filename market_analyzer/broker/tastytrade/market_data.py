@@ -9,8 +9,10 @@ from __future__ import annotations
 import asyncio
 import concurrent.futures
 import logging
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from typing import TYPE_CHECKING
+
+import pandas as pd
 
 from market_analyzer.broker.base import MarketDataProvider
 from market_analyzer.models.quotes import OptionQuote
@@ -25,11 +27,25 @@ logger = logging.getLogger(__name__)
 _thread_pool = concurrent.futures.ThreadPoolExecutor(max_workers=2)
 
 
+def _today_market_open() -> datetime:
+    """Return today at 9:30 ET as a timezone-aware datetime (UTC)."""
+    try:
+        from zoneinfo import ZoneInfo
+    except ImportError:
+        from backports.zoneinfo import ZoneInfo  # type: ignore[no-redef]
+
+    et = ZoneInfo("US/Eastern")
+    now_et = datetime.now(et)
+    open_et = now_et.replace(hour=9, minute=30, second=0, microsecond=0)
+    return open_et.astimezone(timezone.utc)
+
+
 class TastyTradeMarketData(MarketDataProvider):
     """DXLink streaming quotes and Greeks — same pattern as cotrader adapter."""
 
     def __init__(self, session: TastyTradeBrokerSession) -> None:
         self._session = session
+        self._loop: asyncio.AbstractEventLoop | None = None
 
     @property
     def provider_name(self) -> str:
@@ -146,6 +162,95 @@ class TastyTradeMarketData(MarketDataProvider):
 
         return result
 
+    # -- Intraday candles + underlying price --
+
+    def get_intraday_candles(
+        self, ticker: str, interval: str = "5m",
+    ) -> pd.DataFrame:
+        """Today's intraday OHLCV candles via DXLink Candle subscription."""
+        try:
+            return self._run_async(self._fetch_intraday_candles(ticker, interval))
+        except Exception as e:
+            logger.warning("Intraday candle fetch failed for %s: %s", ticker, e)
+            return pd.DataFrame()
+
+    def get_underlying_price(self, ticker: str) -> float | None:
+        """Real-time underlying mid price via DXLink equity Quote."""
+        try:
+            return self._run_async(self._fetch_underlying_price(ticker))
+        except Exception as e:
+            logger.warning("Underlying price fetch failed for %s: %s", ticker, e)
+            return None
+
+    async def _fetch_intraday_candles(
+        self, ticker: str, interval: str,
+    ) -> pd.DataFrame:
+        """Subscribe to DXLink Candle events for today's bars."""
+        from tastytrade.dxfeed import Candle
+        from tastytrade.streamer import DXLinkStreamer
+
+        rows: dict[int, dict] = {}  # event.time → OHLCV row (dedup updates)
+
+        try:
+            async with DXLinkStreamer(self._session.data_session) as streamer:
+                start_time = _today_market_open()
+                await streamer.subscribe_candle([ticker], interval, start_time)
+
+                end = asyncio.get_event_loop().time() + 10.0
+                while asyncio.get_event_loop().time() < end:
+                    try:
+                        event = await asyncio.wait_for(
+                            streamer.get_event(Candle), timeout=2.0,
+                        )
+                        ts = int(event.time) if event.time else 0
+                        if ts > 0:
+                            rows[ts] = {
+                                "time": ts,
+                                "Open": float(event.open),
+                                "High": float(event.high),
+                                "Low": float(event.low),
+                                "Close": float(event.close),
+                                "Volume": float(event.volume or 0),
+                            }
+                        if getattr(event, "snapshot_end", False):
+                            break
+                    except asyncio.TimeoutError:
+                        break
+
+        except Exception as e:
+            logger.warning("DXLink candle fetch error: %s", e)
+
+        if not rows:
+            return pd.DataFrame()
+
+        df = pd.DataFrame(list(rows.values()))
+        df.index = pd.to_datetime(df.pop("time"), unit="ms", utc=True)
+        df.index = df.index.tz_convert("US/Eastern").tz_localize(None)
+        return df.sort_index()
+
+    async def _fetch_underlying_price(self, ticker: str) -> float | None:
+        """Subscribe to DXLink equity Quote for real-time bid/ask mid."""
+        from tastytrade.dxfeed import Quote as DXQuote
+        from tastytrade.streamer import DXLinkStreamer
+
+        try:
+            async with DXLinkStreamer(self._session.data_session) as streamer:
+                await streamer.subscribe(DXQuote, [ticker])
+                try:
+                    event = await asyncio.wait_for(
+                        streamer.get_event(DXQuote), timeout=5.0,
+                    )
+                    bid = float(event.bid_price or 0)
+                    ask = float(event.ask_price or 0)
+                    if bid > 0 and ask > 0:
+                        return round((bid + ask) / 2, 2)
+                    return float(event.last_price or 0) or None
+                except asyncio.TimeoutError:
+                    return None
+        except Exception as e:
+            logger.warning("DXLink underlying quote error: %s", e)
+            return None
+
     # -- DXLink streaming (same pattern as cotrader) --
 
     async def _fetch_quotes_via_dxlink(self, streamer_symbols: list[str]) -> dict[str, dict]:
@@ -237,8 +342,8 @@ class TastyTradeMarketData(MarketDataProvider):
     def _run_async(self, coro):
         """Run async coroutine from sync context.
 
-        Handles both standalone and event-loop-already-running (FastAPI) scenarios.
-        Same approach as cotrader adapter.
+        Uses a persistent event loop so the tastytrade SDK's httpx AsyncClient
+        doesn't accumulate stale connections across asyncio.run() calls.
         """
         try:
             loop = asyncio.get_running_loop()
@@ -246,10 +351,14 @@ class TastyTradeMarketData(MarketDataProvider):
             loop = None
 
         if loop and loop.is_running():
+            # Already inside an async context (e.g. FastAPI) — use thread pool
             future = _thread_pool.submit(asyncio.run, coro)
             return future.result(timeout=30)
         else:
-            return asyncio.run(coro)
+            # Standalone: reuse persistent loop to keep httpx connections alive
+            if self._loop is None or self._loop.is_closed():
+                self._loop = asyncio.new_event_loop()
+            return self._loop.run_until_complete(coro)
 
     def _leg_to_streamer_symbol(self, leg: LegSpec) -> str | None:
         """Convert LegSpec to DXLink streamer symbol.

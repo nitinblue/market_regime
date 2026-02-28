@@ -9,14 +9,20 @@ import pandas as pd
 from market_analyzer.models.technicals import ORBData, TechnicalSnapshot
 
 if TYPE_CHECKING:
+    from market_analyzer.broker.base import MarketDataProvider
     from market_analyzer.data.service import DataService
 
 
 class TechnicalService:
     """Compute technical indicators and Opening Range Breakout levels."""
 
-    def __init__(self, data_service: DataService | None = None) -> None:
+    def __init__(
+        self,
+        data_service: DataService | None = None,
+        market_data: MarketDataProvider | None = None,
+    ) -> None:
         self.data_service = data_service
+        self._market_data = market_data
 
     def _get_ohlcv(self, ticker: str, ohlcv: pd.DataFrame | None) -> pd.DataFrame:
         if ohlcv is not None:
@@ -52,6 +58,15 @@ class TechnicalService:
                        data_service available and daily_atr is None.
         """
         from market_analyzer.features.orb import compute_orb
+
+        # Try broker intraday candles first, then yfinance fallback
+        if intraday is None and self._market_data is not None:
+            try:
+                broker_df = self._market_data.get_intraday_candles(ticker, "5m")
+                if not broker_df.empty:
+                    intraday = broker_df
+            except Exception:
+                pass  # fall through to yfinance
 
         if intraday is None:
             import yfinance as yf

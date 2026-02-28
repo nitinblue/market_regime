@@ -121,10 +121,15 @@ def _parse_earnings_dates(ticker_obj: yf.Ticker) -> list[EarningsEvent]:
     return events
 
 
-def _parse_upcoming_events(ticker_obj: yf.Ticker, info: dict[str, Any]) -> UpcomingEvents:
+def _parse_upcoming_events(
+    ticker_obj: yf.Ticker,
+    info: dict[str, Any],
+    skip_earnings: bool = False,
+) -> UpcomingEvents:
     """Parse upcoming events (earnings date, dividends) from yfinance.
 
     Handles ETFs/commodities gracefully — they have no earnings calendar.
+    When skip_earnings=True, skips the calendar call entirely (avoids yfinance warnings).
     """
     today = date.today()
 
@@ -132,30 +137,31 @@ def _parse_upcoming_events(ticker_obj: yf.Ticker, info: dict[str, Any]) -> Upcom
     next_earnings: date | None = None
     days_to_earnings: int | None = None
 
-    try:
-        cal = ticker_obj.calendar
-        if cal is not None:
-            if isinstance(cal, dict):
-                ed = cal.get("Earnings Date")
-                if ed is not None:
-                    if isinstance(ed, list) and len(ed) > 0:
-                        next_earnings = ed[0].date() if hasattr(ed[0], "date") else ed[0]
-                    elif hasattr(ed, "date"):
-                        next_earnings = ed.date()
-            # pandas DataFrame case
-            elif hasattr(cal, "loc"):
-                if "Earnings Date" in cal.index:
-                    ed = cal.loc["Earnings Date"]
-                    if hasattr(ed, "iloc"):
-                        ed = ed.iloc[0]
-                    if hasattr(ed, "date"):
-                        next_earnings = ed.date()
-    except (KeyError, TypeError, IndexError, AttributeError):
-        # ETFs/commodities have no calendar data — expected
-        pass
-    except Exception:
-        # Unexpected yfinance errors — don't crash the entire snapshot
-        pass
+    if not skip_earnings:
+        try:
+            cal = ticker_obj.calendar
+            if cal is not None:
+                if isinstance(cal, dict):
+                    ed = cal.get("Earnings Date")
+                    if ed is not None:
+                        if isinstance(ed, list) and len(ed) > 0:
+                            next_earnings = ed[0].date() if hasattr(ed[0], "date") else ed[0]
+                        elif hasattr(ed, "date"):
+                            next_earnings = ed.date()
+                # pandas DataFrame case
+                elif hasattr(cal, "loc"):
+                    if "Earnings Date" in cal.index:
+                        ed = cal.loc["Earnings Date"]
+                        if hasattr(ed, "iloc"):
+                            ed = ed.iloc[0]
+                        if hasattr(ed, "date"):
+                            next_earnings = ed.date()
+        except (KeyError, TypeError, IndexError, AttributeError):
+            # ETFs/commodities have no calendar data — expected
+            pass
+        except Exception:
+            # Unexpected yfinance errors — don't crash the entire snapshot
+            pass
 
     if next_earnings is not None:
         days_to_earnings = (next_earnings - today).days
@@ -193,6 +199,31 @@ def _parse_upcoming_events(ticker_obj: yf.Ticker, info: dict[str, Any]) -> Upcom
     )
 
 
+def _get_asset_type(info: dict[str, Any]) -> str:
+    """Determine asset type from yfinance info dict.
+
+    Returns uppercase string: EQUITY, ETF, INDEX, MUTUALFUND, CRYPTOCURRENCY, etc.
+    """
+    qt = info.get("quoteType", "").upper()
+    if qt:
+        return qt
+
+    # Heuristic fallback when quoteType is missing:
+    # - ETFs have no sector/industry but have holdings
+    # - Indexes often start with ^
+    if info.get("sector") is None and info.get("industry") is None:
+        if info.get("totalAssets") is not None:
+            return "ETF"
+    return "EQUITY"  # default assumption
+
+
+# Asset types that never have per-company earnings/financials
+_NON_EQUITY_TYPES = frozenset({
+    "ETF", "INDEX", "MUTUALFUND", "MONEYMARKET", "CRYPTOCURRENCY",
+    "CURRENCY", "FUTURE", "COMMODITY",
+})
+
+
 def fetch_fundamentals(
     ticker: str,
     ttl_minutes: int | None = None,
@@ -200,6 +231,8 @@ def fetch_fundamentals(
     """Fetch stock fundamentals for a ticker via yfinance.
 
     Results are cached in-memory with a configurable TTL.
+    Checks asset type first — skips earnings/calendar calls for ETFs, indexes,
+    and funds (avoiding yfinance 404 noise).
 
     Args:
         ticker: Stock ticker symbol (case-insensitive).
@@ -236,9 +269,19 @@ def fetch_fundamentals(
 
     current_price = _safe_get(info, "regularMarketPrice") or _safe_get(info, "currentPrice")
 
+    # Determine asset type BEFORE making any more API calls
+    asset_type = _get_asset_type(info)
+    is_equity = asset_type not in _NON_EQUITY_TYPES
+
+    # Only fetch earnings for individual stocks — ETFs, indexes, funds don't have them
+    # and yfinance emits noisy warnings ("symbol may be delisted", HTTP 404)
+    recent_earnings = _parse_earnings_dates(t) if is_equity else []
+    upcoming_events = _parse_upcoming_events(t, info, skip_earnings=not is_equity)
+
     snapshot = FundamentalsSnapshot(
         ticker=ticker,
         as_of=now,
+        asset_type=asset_type,
         business=BusinessInfo(
             long_name=info.get("longName"),
             sector=info.get("sector"),
@@ -289,8 +332,8 @@ def fetch_fundamentals(
             dividend_rate=_safe_get(info, "dividendRate"),
         ),
         fifty_two_week=_build_52week(info, current_price),
-        recent_earnings=_parse_earnings_dates(t),
-        upcoming_events=_parse_upcoming_events(t, info),
+        recent_earnings=recent_earnings,
+        upcoming_events=upcoming_events,
     )
 
     _cache[ticker] = (snapshot, now + timedelta(minutes=ttl_minutes))

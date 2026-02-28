@@ -84,10 +84,13 @@ class OpportunityService:
         macro = self.macro_service.calendar(as_of=as_of)
 
         orb = None
-        if intraday is not None and self.technical_service is not None:
-            orb = self.technical_service.orb(
-                ticker, intraday=intraday, daily_atr=technicals.atr
-            )
+        if self.technical_service is not None:
+            try:
+                orb = self.technical_service.orb(
+                    ticker, intraday=intraday, daily_atr=technicals.atr,
+                )
+            except Exception:
+                pass  # ORB is optional; don't fail 0DTE assessment over it
 
         fundamentals = self._get_fundamentals(ticker)
         vol_surface = self._get_vol_surface(ticker)

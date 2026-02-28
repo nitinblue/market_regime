@@ -84,15 +84,16 @@ class OptionQuoteService:
     def get_leg_quotes(self, legs: list[LegSpec], ticker: str = "") -> list[OptionQuote]:
         """Quotes for specific legs (used by adjustment service).
 
-        Tries broker.get_quotes(legs), falls back to yfinance chain matching.
+        Returns broker quotes only. Returns empty list if no broker connected.
+        Does NOT fall back to Black-Scholes estimates.
         """
         if self._market_data:
             try:
                 return self._market_data.get_quotes(legs)
             except Exception as e:
-                logger.warning("Broker leg quotes failed, falling back: %s", e)
+                logger.warning("Broker leg quotes failed: %s", e)
 
-        return self._yfinance_leg_fallback(legs, ticker)
+        return []
 
     def get_metrics(self, ticker: str) -> MarketMetrics | None:
         """IV rank, percentile, beta. None if no metrics provider."""
@@ -184,50 +185,19 @@ class OptionQuoteService:
             source="yfinance",
         )
 
-    def _yfinance_leg_fallback(
-        self, legs: list[LegSpec], ticker: str,
-    ) -> list[OptionQuote]:
-        """Build OptionQuotes for specific legs using BS pricing."""
-        from market_analyzer.opportunity.option_plays._trade_spec_helpers import _bs_price
-
-        # Get underlying price
-        price = 0.0
-        if self._data_service:
-            try:
-                ohlcv = self._data_service.get_ohlcv(ticker)
-                if not ohlcv.empty:
-                    price = float(ohlcv["Close"].iloc[-1])
-            except Exception:
-                pass
-
-        result: list[OptionQuote] = []
-        for leg in legs:
-            dte_years = max(leg.days_to_expiry, 1) / 365.0
-            iv = leg.atm_iv_at_expiry
-            theo = _bs_price(price, leg.strike, dte_years, iv, leg.option_type) if price > 0 else 0.0
-
-            # Estimate bid/ask spread from BS price (rough: 5% spread for liquid)
-            spread = theo * 0.05 if theo > 0 else 0.05
-            bid = max(theo - spread / 2, 0.0)
-            ask = theo + spread / 2
-
-            result.append(OptionQuote(
-                ticker=ticker,
-                expiration=leg.expiration,
-                strike=leg.strike,
-                option_type=leg.option_type,
-                bid=round(bid, 2),
-                ask=round(ask, 2),
-                mid=round(theo, 2),
-                implied_volatility=iv,
-            ))
-
-        return result
-
     def _infer_underlying_price(
         self, quotes: list[OptionQuote], ticker: str,
     ) -> float:
-        """Infer underlying price from option chain (ATM put-call parity)."""
+        """Infer underlying price — try broker direct quote first, then put-call parity."""
+        # Try direct broker underlying price (DXLink equity quote)
+        if self._market_data is not None:
+            try:
+                price = self._market_data.get_underlying_price(ticker)
+                if price and price > 0:
+                    return price
+            except Exception:
+                pass
+
         if not quotes:
             return 0.0
 

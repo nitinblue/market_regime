@@ -65,9 +65,10 @@ class AnalyzerCLI(cmd.Cmd):
     )
     prompt = _styled("market_analyzer> ", "cyan") if sys.stdout.isatty() else "market_analyzer> "
 
-    def __init__(self, market: str = "US") -> None:
+    def __init__(self, market: str = "US", broker: bool = False) -> None:
         super().__init__()
         self._market = market
+        self._broker = broker
         self._ma = None  # Lazy-init
 
     def _get_ma(self):
@@ -75,7 +76,34 @@ class AnalyzerCLI(cmd.Cmd):
         if self._ma is None:
             print("Initializing services...")
             from market_analyzer import DataService, MarketAnalyzer
-            self._ma = MarketAnalyzer(data_service=DataService(), market=self._market)
+
+            market_data = None
+            market_metrics = None
+
+            if self._broker:
+                try:
+                    from dotenv import load_dotenv
+                    load_dotenv()
+                    from market_analyzer.broker.tastytrade.session import TastyTradeBrokerSession
+                    from market_analyzer.broker.tastytrade.market_data import TastyTradeMarketData
+                    from market_analyzer.broker.tastytrade.metrics import TastyTradeMetrics
+
+                    session = TastyTradeBrokerSession(is_paper=False)
+                    if session.connect():
+                        market_data = TastyTradeMarketData(session)
+                        market_metrics = TastyTradeMetrics(session)
+                        print(_styled(f"Broker connected: {session.account.account_number}", "green"))
+                    else:
+                        print(_styled("Broker connection failed — running without broker", "yellow"))
+                except Exception as e:
+                    print(_styled(f"Broker unavailable: {e}", "yellow"))
+
+            self._ma = MarketAnalyzer(
+                data_service=DataService(),
+                market=self._market,
+                market_data=market_data,
+                market_metrics=market_metrics,
+            )
             print(_styled("Ready.", "green"))
         return self._ma
 
@@ -752,11 +780,14 @@ class AnalyzerCLI(cmd.Cmd):
                     elif s == "mean_reversion":
                         result = ma.opportunity.assess_mean_reversion(ticker)
                     elif s == "orb":
-                        # ORB without intraday data → NO_GO (expected)
                         from market_analyzer.opportunity.setups.orb import assess_orb as _orb_assess
                         regime = ma.regime.detect(ticker)
                         technicals = ma.technicals.snapshot(ticker)
-                        result = _orb_assess(ticker, regime, technicals, orb=None)
+                        try:
+                            orb_data = ma.technicals.orb(ticker, daily_atr=technicals.atr)
+                        except Exception:
+                            orb_data = None
+                        result = _orb_assess(ticker, regime, technicals, orb=orb_data)
                     else:
                         continue
 
@@ -1056,16 +1087,25 @@ class AnalyzerCLI(cmd.Cmd):
             if result.distance_to_short_call_pct is not None:
                 print(f"  |  Short call: {result.distance_to_short_call_pct:+.1f}%", end="")
             print()
-            print(f"  P&L: ${result.pnl_estimate:+.2f}  |  Regime: R{result.regime_id}")
+            pnl_str = f"${result.pnl_estimate:+.2f}" if result.pnl_estimate is not None else "N/A (no broker)"
+            print(f"  P&L: {pnl_str}  |  Regime: R{result.regime_id}")
 
             # Adjustments
             print()
             for i, adj in enumerate(result.adjustments, 1):
                 type_label = adj.adjustment_type.value.upper().replace("_", " ")
                 print(f"  #{i}  {_styled(type_label, 'bold')} — {adj.rationale}")
-                cost_str = f"${adj.estimated_cost:+.2f}" if adj.estimated_cost != 0 else "$0"
+                if adj.estimated_cost is not None:
+                    cost_str = f"${adj.estimated_cost:+.2f}" if adj.estimated_cost != 0 else "$0"
+                else:
+                    cost_str = _styled("N/A", "dim")
                 risk_str = f"${adj.risk_change:+.0f}" if adj.risk_change != 0 else "unchanged"
-                eff_str = f"{adj.efficiency:.2f}" if adj.efficiency is not None else ("∞" if adj.estimated_cost <= 0 and adj.risk_change < 0 else "—")
+                if adj.efficiency is not None:
+                    eff_str = f"{adj.efficiency:.2f}"
+                elif adj.estimated_cost is not None and adj.estimated_cost <= 0 and adj.risk_change < 0:
+                    eff_str = "∞"
+                else:
+                    eff_str = "—"
                 urgency_style = {"immediate": "red", "soon": "yellow", "monitor": "dim"}.get(adj.urgency, "")
                 print(f"      Cost: {cost_str}  |  Risk: {risk_str}  |  "
                       f"Efficiency: {eff_str}  |  "
@@ -1073,8 +1113,8 @@ class AnalyzerCLI(cmd.Cmd):
                 if adj.description and adj.description != adj.rationale:
                     print(f"      {_styled(adj.description, 'dim')}")
                 # Warn on poor cost/risk ratio for paid adjustments
-                if adj.estimated_cost > 0 and adj.risk_change < 0:
-                    ratio = abs(adj.risk_change) / adj.estimated_cost if adj.estimated_cost > 0 else 0
+                if adj.estimated_cost is not None and adj.estimated_cost > 0 and adj.risk_change < 0:
+                    ratio = abs(adj.risk_change) / adj.estimated_cost
                     if ratio < 1.0:
                         print(f"      {_styled(f'⚠ POOR — paying ${adj.estimated_cost:.2f} to reduce ${abs(adj.risk_change):.0f} risk', 'yellow')}")
                 print()
@@ -1215,10 +1255,15 @@ def main() -> None:
         choices=["US", "India"],
         help="Default market (default: US)",
     )
+    parser.add_argument(
+        "--broker",
+        action="store_true",
+        help="Connect to TastyTrade broker for live quotes/Greeks",
+    )
     args = parser.parse_args()
 
     try:
-        cli = AnalyzerCLI(market=args.market)
+        cli = AnalyzerCLI(market=args.market, broker=args.broker)
         cli.cmdloop()
     except KeyboardInterrupt:
         print("\nGoodbye.")

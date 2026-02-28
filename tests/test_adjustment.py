@@ -274,38 +274,55 @@ class TestBreachedRanksCloseHigh:
         assert AdjustmentType.CLOSE_FULL in top_3_types
 
 
-class TestAdjustmentsArePriced:
-    def test_estimated_cost_not_none(self):
-        """Each adjustment has a non-None estimated_cost."""
+class TestNoBrokerCostsAreNone:
+    """Without broker, costs should be None (not BS estimates)."""
+
+    def test_no_broker_pnl_is_none(self):
         svc = AdjustmentService()
         ic = _make_iron_condor()
         regime = _make_regime(2)
         tech = _make_technicals(583.0)
 
         result = svc.analyze(ic, regime, tech)
+        assert result.pnl_estimate is None
+
+    def test_no_broker_adjustment_costs_are_none(self):
+        svc = AdjustmentService()
+        ic = _make_iron_condor(price=600, short_put=580, short_call=620)
+        regime = _make_regime(2)
+        tech = _make_technicals(583.0)
+
+        result = svc.analyze(ic, regime, tech)
         for adj in result.adjustments:
-            assert adj.estimated_cost is not None
+            if adj.adjustment_type == AdjustmentType.DO_NOTHING:
+                assert adj.estimated_cost == 0.0  # DO_NOTHING always 0
+            else:
+                assert adj.estimated_cost is None, (
+                    f"{adj.adjustment_type}: expected None cost without broker, "
+                    f"got {adj.estimated_cost}"
+                )
+
+    def test_summary_shows_no_broker(self):
+        svc = AdjustmentService()
+        ic = _make_iron_condor()
+        regime = _make_regime(1)
+        tech = _make_technicals(600.0)
+
+        result = svc.analyze(ic, regime, tech)
+        assert "N/A" in result.summary
 
 
 class TestEfficiencyRanking:
     def test_sorted_best_first(self):
-        """Adjustments are sorted with most efficient first."""
+        """Adjustments are sorted with DO_NOTHING first."""
         svc = AdjustmentService()
         ic = _make_iron_condor()
         regime = _make_regime(2)
         tech = _make_technicals(583.0)
 
         result = svc.analyze(ic, regime, tech)
-        # Verify that credit-generating adjustments come before debit ones
-        first_cost = None
-        for adj in result.adjustments:
-            if adj.adjustment_type == AdjustmentType.DO_NOTHING:
-                continue
-            if adj.estimated_cost <= 0 and adj.risk_change < 0:
-                # This should come early
-                first_cost = adj.estimated_cost
-                break
-
+        # DO_NOTHING should be first
+        assert result.adjustments[0].adjustment_type == AdjustmentType.DO_NOTHING
         # At minimum, adjustments list should be non-empty and ordered
         assert len(result.adjustments) >= 2
 
@@ -382,3 +399,16 @@ class TestDoNothingAlwaysPresent:
             result = svc.analyze(trade, regime, tech)
             types = [a.adjustment_type for a in result.adjustments]
             assert AdjustmentType.DO_NOTHING in types, f"DO_NOTHING missing for {trade.structure_type}"
+
+
+class TestQuoteSourceProperty:
+    def test_no_broker(self):
+        svc = AdjustmentService()
+        assert "no broker" in svc.quote_source
+
+    def test_with_broker(self):
+        from market_analyzer.service.option_quotes import OptionQuoteService
+        from tests.test_option_quotes import MockMarketData
+        qs = OptionQuoteService(market_data=MockMarketData())
+        svc = AdjustmentService(quote_service=qs)
+        assert "real quotes" in svc.quote_source

@@ -12,6 +12,7 @@ import pytest
 from market_analyzer.fundamentals.fetch import (
     _safe_get,
     _build_52week,
+    _get_asset_type,
     fetch_fundamentals,
     invalidate_fundamentals_cache,
     _cache,
@@ -230,3 +231,160 @@ class TestFetchFundamentals:
         mock_ticker_cls.return_value = _mock_ticker()
         result = fetch_fundamentals("AAPL", ttl_minutes=60)
         assert result.upcoming_events.next_earnings_date == date(2026, 4, 20)
+
+
+# --- Asset type detection ---
+
+class TestGetAssetType:
+    def test_equity_from_quote_type(self):
+        assert _get_asset_type({"quoteType": "EQUITY"}) == "EQUITY"
+
+    def test_etf_from_quote_type(self):
+        assert _get_asset_type({"quoteType": "ETF"}) == "ETF"
+
+    def test_index_from_quote_type(self):
+        assert _get_asset_type({"quoteType": "INDEX"}) == "INDEX"
+
+    def test_mutual_fund(self):
+        assert _get_asset_type({"quoteType": "MUTUALFUND"}) == "MUTUALFUND"
+
+    def test_crypto(self):
+        assert _get_asset_type({"quoteType": "CRYPTOCURRENCY"}) == "CRYPTOCURRENCY"
+
+    def test_case_insensitive(self):
+        assert _get_asset_type({"quoteType": "etf"}) == "ETF"
+
+    def test_missing_quote_type_with_sector_is_equity(self):
+        assert _get_asset_type({"sector": "Technology"}) == "EQUITY"
+
+    def test_missing_quote_type_with_total_assets_is_etf(self):
+        assert _get_asset_type({"totalAssets": 50_000_000}) == "ETF"
+
+    def test_missing_quote_type_empty_info_is_equity(self):
+        assert _get_asset_type({}) == "EQUITY"
+
+
+# --- ETF boundary: no earnings calls ---
+
+def _mock_etf_info() -> dict:
+    """ETF info dict — has quoteType=ETF, no sector/industry."""
+    return {
+        "regularMarketPrice": 185.0,
+        "quoteType": "ETF",
+        "longName": "SPDR Gold Shares",
+        "beta": 0.12,
+        "fiftyTwoWeekHigh": 200.0,
+        "fiftyTwoWeekLow": 150.0,
+        "totalAssets": 50_000_000_000,
+        "dividendYield": 0.0,
+    }
+
+
+def _mock_etf_ticker() -> MagicMock:
+    """Mock yfinance.Ticker for an ETF — earnings calls should NOT be made."""
+    mock = MagicMock()
+    mock.info = _mock_etf_info()
+    # These should NOT be called for ETFs
+    mock.get_earnings_dates.side_effect = AssertionError(
+        "get_earnings_dates should not be called for ETFs"
+    )
+    mock.calendar = None  # sentinel
+    return mock
+
+
+class TestETFBoundary:
+    def setup_method(self):
+        _cache.clear()
+
+    @patch("market_analyzer.fundamentals.fetch.yf.Ticker")
+    def test_etf_skips_earnings_calls(self, mock_ticker_cls):
+        """ETF should never call get_earnings_dates() or .calendar."""
+        mock = _mock_etf_ticker()
+        mock_ticker_cls.return_value = mock
+
+        result = fetch_fundamentals("GLD", ttl_minutes=60)
+
+        assert result.asset_type == "ETF"
+        assert result.recent_earnings == []
+        assert result.upcoming_events.days_to_earnings is None
+        # get_earnings_dates should not have been called
+        mock.get_earnings_dates.assert_not_called()
+
+    @patch("market_analyzer.fundamentals.fetch.yf.Ticker")
+    def test_etf_has_basic_fields(self, mock_ticker_cls):
+        """ETF returns 52-week, beta, dividends — no P/E or EPS."""
+        mock_ticker_cls.return_value = _mock_etf_ticker()
+        result = fetch_fundamentals("GLD", ttl_minutes=60)
+
+        assert result.business.long_name == "SPDR Gold Shares"
+        assert result.business.beta == 0.12
+        assert result.fifty_two_week.high == 200.0
+        assert result.valuation.trailing_pe is None
+        assert result.earnings.trailing_eps is None
+
+    @patch("market_analyzer.fundamentals.fetch.yf.Ticker")
+    def test_etf_is_equity_false(self, mock_ticker_cls):
+        mock_ticker_cls.return_value = _mock_etf_ticker()
+        result = fetch_fundamentals("GLD", ttl_minutes=60)
+        assert not result.is_equity
+        assert not result.has_earnings
+
+    @patch("market_analyzer.fundamentals.fetch.yf.Ticker")
+    def test_equity_is_equity_true(self, mock_ticker_cls):
+        mock_ticker_cls.return_value = _mock_ticker()
+        result = fetch_fundamentals("AAPL", ttl_minutes=60)
+        assert result.is_equity
+        assert result.asset_type == "EQUITY"
+
+    @patch("market_analyzer.fundamentals.fetch.yf.Ticker")
+    def test_index_skips_earnings(self, mock_ticker_cls):
+        """Index tickers skip earnings calls."""
+        mock = MagicMock()
+        mock.info = {
+            "regularMarketPrice": 5800.0,
+            "quoteType": "INDEX",
+            "longName": "S&P 500",
+        }
+        mock.get_earnings_dates.side_effect = AssertionError("should not call")
+        mock_ticker_cls.return_value = mock
+
+        result = fetch_fundamentals("SPX", ttl_minutes=60)
+        assert result.asset_type == "INDEX"
+        assert result.recent_earnings == []
+        mock.get_earnings_dates.assert_not_called()
+
+    @patch("market_analyzer.fundamentals.fetch.yf.Ticker")
+    def test_mutualfund_skips_earnings(self, mock_ticker_cls):
+        mock = MagicMock()
+        mock.info = {
+            "regularMarketPrice": 100.0,
+            "quoteType": "MUTUALFUND",
+            "longName": "Vanguard 500",
+        }
+        mock.get_earnings_dates.side_effect = AssertionError("should not call")
+        mock_ticker_cls.return_value = mock
+
+        result = fetch_fundamentals("VFIAX", ttl_minutes=60)
+        assert result.asset_type == "MUTUALFUND"
+        mock.get_earnings_dates.assert_not_called()
+
+    @patch("market_analyzer.fundamentals.fetch.yf.Ticker")
+    def test_no_market_price_raises(self, mock_ticker_cls):
+        """Tickers with no price at all should raise ValueError."""
+        mock = MagicMock()
+        mock.info = {"quoteType": "ETF"}  # no regularMarketPrice
+        mock_ticker_cls.return_value = mock
+
+        with pytest.raises(ValueError, match="No data"):
+            fetch_fundamentals("FAKE", ttl_minutes=60)
+
+    @patch("market_analyzer.fundamentals.fetch.yf.Ticker")
+    def test_info_fetch_failure_raises(self, mock_ticker_cls):
+        """Network error on ticker.info raises ValueError."""
+        mock = MagicMock()
+        mock.info.__getitem__ = MagicMock(side_effect=ConnectionError("network"))
+        type(mock).info = property(lambda s: (_ for _ in ()).throw(ConnectionError("network")))
+        mock_ticker_cls.return_value = mock
+
+        with pytest.raises(ValueError, match="Failed to fetch"):
+            fetch_fundamentals("SPY", ttl_minutes=60)

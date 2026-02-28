@@ -185,15 +185,22 @@ class TestAdjustmentUsesRealQuotes:
 
         assert "real quotes" in adj.quote_source
 
-    def test_adjustment_without_broker_uses_bs(self):
+    def test_adjustment_without_broker_no_costs(self):
         from market_analyzer.service.adjustment import AdjustmentService
 
         adj = AdjustmentService()
-        assert "estimated" in adj.quote_source
+        assert "no broker" in adj.quote_source
 
-    def test_adjustment_with_yfinance_only(self):
+    def test_adjustment_with_yfinance_only_no_costs(self):
         from market_analyzer.service.adjustment import AdjustmentService
 
         qs = OptionQuoteService()
         adj = AdjustmentService(quote_service=qs)
-        assert "estimated" in adj.quote_source
+        assert "no broker" in adj.quote_source
+
+    def test_leg_quotes_empty_without_broker(self):
+        """get_leg_quotes returns empty list without broker (no BS fallback)."""
+        qs = OptionQuoteService()
+        legs = [_make_leg(strike=580)]
+        quotes = qs.get_leg_quotes(legs, ticker="SPY")
+        assert quotes == []
